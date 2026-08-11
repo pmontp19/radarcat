@@ -1,0 +1,8 @@
+# SwiftPM build output
+.build/
+
+# Packaged app bundle (produced by Scripts/package_app.sh)
+RadarCat.app/
+
+# macOS
+.DS_Store
