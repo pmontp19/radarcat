@@ -11,38 +11,33 @@ actor RadarCompositor {
     private var baseTiles: [(x: Int, y: Int, data: Data)]?
     private let cache = NSCache<NSString, FrameCache>()
 
-    /// Bounding box de Catalunya en tile-coords. Standard XYZ slippy-map
-    /// convention: tile y increases *southward* (bigger y = more south),
-    /// confirmed empirically against the Meteocat tile server (tile y=78
-    /// shows terrain only near its north edge with blank space beyond, tile
-    /// y=83 is blank open sea south of Catalonia).
+    /// Bounding box de Catalunya en tile-coords *de `BaseGrid`* (z=8, tile y
+    /// creix cap al *nord* - vegeu `BaseGrid`). Aquest crop viu en l'espai de
+    /// la base, no del radar: el radar (z=7, `RadarGrid`) es dibuixa escalat
+    /// x2 sobre aquesta base (vegeu `compositeFrame`), no al revés.
     ///
-    /// These values were tuned by eye against the composited output
-    /// (`/Users/pere/Desktop/radarcat_appframe.png`), not derived from a
-    /// formula, because the tile source itself has irregularities that a
-    /// formula can't see:
-    /// - Almost the entire labelled Catalonia map (Vielha to Tarragona,
-    ///   Lleida to Girona) lives inside the single tile (x=64, y=80); its
-    ///   north edge (~y=78.9) and south edge (~y=79.97) are the real limits
-    ///   of useful, continuous coverage.
-    /// - Tile y=81 has a genuine ~23px black border baked into its top edge
-    ///   (verified on the raw tile), so the crop's south bound stays just
-    ///   above y=80.0 to avoid showing that border as a stray black line.
-    /// - Tile y=79 contains an unrelated, disconnected fragment (a "Tortosa"
-    ///   label next to the meteo.cat logo over open sea) that does not
-    ///   connect geographically to what's south of it in tile y=80 - most
-    ///   likely leftover branding/placeholder content for tiles outside the
-    ///   widget's real coverage, not a real northward continuation. Reaching
-    ///   into it to try to pick up a labelled Tortosa reintroduces exactly
-    ///   the kind of dead/nonsensical content this pass is trying to remove,
-    ///   so Tortosa is left out rather than stitched in from there.
-    /// The window below favours Vielha/Val d'Aran (north) and Girona's coast
-    /// (east) with comfortable margins, and Tarragona with a small but real
-    /// margin (rather than clipped, as it is in the Python reference) at the
-    /// south, landing on roughly a 1.18:1 aspect close to the popover's own
-    /// image area (see `MenuBarContentView.radarStage`, ~380x320pt).
-    static let catalunyaTileX = 63.9...65.1
-    static let catalunyaTileY = 78.95...79.97
+    /// Abans això retallava directament els tiles de radar/base de z=7, que
+    /// van resultar ser una imatge pre-tallada no estàndard sense les Terres
+    /// de l'Ebre (amb una vora negra baixada del tile y=81 i un fragment de
+    /// "Tortosa" despenjat sobre mar al tile y=79 - vegeu el git log
+    /// d'aquest fitxer per aquella versió i el raonament complet). Es va
+    /// descobrir baixant el widget real de Meteocat (`ginys/mapaRadar`) en
+    /// un navegador: el seu mapa base fa servir z=8, una projecció contínua
+    /// real que sí conté les Terres de l'Ebre de manera coherent amb la
+    /// resta del mapa (Tortosa apareix just al sud de Tarragona, sense cap
+    /// tall ni fragment despenjat). El radar de Meteocat només existeix a
+    /// z=7, per això es continua fent servir `RadarGrid` per baixar-lo,
+    /// escalant-lo x2 per encaixar amb aquesta base de z=8.
+    ///
+    /// Valors ajustats contra una mesura en píxels del contingut real
+    /// (fronteres/etiquetes/eco de radar) sobre aquesta graella de z=8: el
+    /// cos etiquetat de Catalunya (Vielha a les Terres de l'Ebre, Lleida a
+    /// Girona) queda aproximadament entre tile-x 128.1...130.4 i tile-y
+    /// 158.6...160.8. El rang de sota hi afegeix marge còmode a tots els
+    /// costats (una mica més al nord, on l'eco de pluja sobre Vielha
+    /// sobresurt per sobre de les fronteres administratives).
+    static let catalunyaTileX = 127.6...130.5
+    static let catalunyaTileY = 158.8...162.5
 
     init() {
         let cfg = URLSessionConfiguration.default
@@ -54,26 +49,27 @@ actor RadarCompositor {
     }
 
     /// Retall de Catalunya en coordenades natives de Core Graphics (origen
-    /// baix-esquerra, y creixent cap amunt). Com que el tile y creix cap al
-    /// sud, es converteix a "files des de baix" amb `RadarGrid.yRange.upperBound - y`
-    /// perquè un y de tile més gran (més al sud) doni una y nativa més petita.
+    /// baix-esquerra, y creixent cap amunt). A `BaseGrid` el tile y ja creix
+    /// cap al nord, igual que la y nativa - a diferència de l'antic retall
+    /// sobre `RadarGrid`, aquí NO cal cap "ancoratge"/inversió: la posició
+    /// nativa d'un tile (x,y) és senzillament `(x - xRange.lowerBound) * ts`
+    /// / `(y - yRange.lowerBound) * ts`.
     static var catalunyaCrop: CGRect {
-        let ts = CGFloat(RadarGrid.tileSize)
-        let yAnchor = CGFloat(RadarGrid.yRange.upperBound)
-        let x0 = (CGFloat(catalunyaTileX.lowerBound) - 63) * ts
-        let x1 = (CGFloat(catalunyaTileX.upperBound) - 63) * ts
-        let yMin = (yAnchor - CGFloat(catalunyaTileY.upperBound)) * ts   // south edge
-        let yMax = (yAnchor - CGFloat(catalunyaTileY.lowerBound)) * ts   // north edge
-        return CGRect(x: x0, y: yMin, width: x1 - x0, height: yMax - yMin)
+        let ts = CGFloat(BaseGrid.tileSize)
+        let x0 = (CGFloat(catalunyaTileX.lowerBound) - CGFloat(BaseGrid.xRange.lowerBound)) * ts
+        let x1 = (CGFloat(catalunyaTileX.upperBound) - CGFloat(BaseGrid.xRange.lowerBound)) * ts
+        let y0 = (CGFloat(catalunyaTileY.lowerBound) - CGFloat(BaseGrid.yRange.lowerBound)) * ts
+        let y1 = (CGFloat(catalunyaTileY.upperBound) - CGFloat(BaseGrid.yRange.lowerBound)) * ts
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 
-    /// Carrega els tiles del mapa base (cachejat), un cop per procés.
+    /// Carrega els tiles del mapa base (z=8, `BaseGrid`; cachejat, un cop per procés).
     private func ensureBase() async -> [(x: Int, y: Int, data: Data)] {
         if let baseTiles { return baseTiles }
         var tiles: [(x: Int, y: Int, data: Data)] = []
-        for y in RadarGrid.yRange {
-            for x in RadarGrid.xRange {
-                let url = RadarAPI.fonsTileURL(z: RadarGrid.z, x: x, y: y)
+        for y in BaseGrid.yRange {
+            for x in BaseGrid.xRange {
+                let url = RadarAPI.fonsTileURL(z: BaseGrid.z, x: x, y: y)
                 if let data = await fetch(url) { tiles.append((x, y, data)) }
             }
         }
@@ -90,7 +86,7 @@ actor RadarCompositor {
         guard !base.isEmpty else { return nil }
         let crop = Self.catalunyaCrop
         let cw = Int(crop.width.rounded()), ch = Int(crop.height.rounded())
-        let ts = CGFloat(RadarGrid.tileSize)
+        let baseTs = CGFloat(BaseGrid.tileSize)
         guard cw > 0, ch > 0,
               let ctx = CGContext(data: nil, width: cw, height: ch, bitsPerComponent: 8,
                                   bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
@@ -104,18 +100,34 @@ actor RadarCompositor {
         // tile upside down. Keeping the native, unflipped CTM and computing
         // `dx`/`dy` below in that same native space (see `catalunyaCrop`)
         // avoids that entirely.
-        let drawTile: (Int, Int, Data) -> Void = { x, y, data in
+        let drawBaseTile: (Int, Int, Data) -> Void = { x, y, data in
             guard let img = Self.makeCGImage(from: data) else { return }
-            let dx = CGFloat((x - 63) * RadarGrid.tileSize) - crop.minX
-            let dy = CGFloat((RadarGrid.yRange.upperBound - y) * RadarGrid.tileSize) - crop.minY
-            ctx.draw(img, in: CGRect(x: dx, y: dy, width: ts, height: ts))
+            let dx = CGFloat((x - BaseGrid.xRange.lowerBound) * BaseGrid.tileSize) - crop.minX
+            let dy = CGFloat((y - BaseGrid.yRange.lowerBound) * BaseGrid.tileSize) - crop.minY
+            ctx.draw(img, in: CGRect(x: dx, y: dy, width: baseTs, height: baseTs))
         }
-        for t in base { drawTile(t.x, t.y, t.data) }
+        for t in base { drawBaseTile(t.x, t.y, t.data) }
+
+        // Radar only exists at z=7 (RadarGrid), one zoom level below the
+        // base map's z=8 (BaseGrid), so each radar tile covers exactly the
+        // area of 4 base tiles (standard XYZ nesting: base tile (X,Y) is a
+        // child of radar tile (X/2, Y/2)). Draw each radar tile scaled x2,
+        // anchored at its (2x, 2y) child position in BaseGrid's coordinate
+        // space - the image itself needs no flip, only its anchor point
+        // does, because RadarGrid's y increases *southward* while
+        // BaseGrid's increases *northward* (confirmed empirically, see
+        // BaseGrid's doc comment): scaling up from (2x, 2y) covers that
+        // child plus (2x+1, 2y+1), which correctly lands the radar tile's
+        // own north half over the base's north child and south half over
+        // the south child.
+        let radarTs = baseTs * 2
         for y in RadarGrid.yRange {
             for x in RadarGrid.xRange {
                 let url = RadarAPI.radarTileURL(timestamp: timestamp, z: RadarGrid.z, x: x, y: y)
-                guard let data = await fetch(url) else { continue }
-                drawTile(x, y, data)
+                guard let data = await fetch(url), let img = Self.makeCGImage(from: data) else { continue }
+                let dx = CGFloat((2 * x - BaseGrid.xRange.lowerBound) * BaseGrid.tileSize) - crop.minX
+                let dy = CGFloat((2 * y - BaseGrid.yRange.lowerBound) * BaseGrid.tileSize) - crop.minY
+                ctx.draw(img, in: CGRect(x: dx, y: dy, width: radarTs, height: radarTs))
             }
         }
 
