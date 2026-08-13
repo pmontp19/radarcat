@@ -26,31 +26,40 @@ a 10-frame animation (`RadarAnimator`) built every refresh cycle (`RadarStore`, 
   renderer, so if the debug PNG is right the animation is right, but watch it once to be sure).
   Leave the `savePNG` line in place; it's the only verification hook this project has.
 
-## Tile source: not a normal slippy map
+## Tile sources: two different grids, two different zoom levels
 
-`RadarAPI` fetches `{z}/{x}/{y}` tiles from `static-m.meteo.cat` (radar + `GoogleMapsCompatible`
-base map) using standard XYZ convention: **y increases southward** (confirmed empirically -
-tile y=78 shows terrain only near its north edge, y=83 is blank sea). But the grid used by this
-app (`RadarGrid`: z=7, x 63...68, y 78...83) is **not a continuous geographic pyramid** - it looks
-like a small pre-rendered widget image chopped into a 6x6 tile grid, with real irregularities:
+`RadarAPI` fetches `{z}/{x}/{y}` PNG tiles from `static-m.meteo.cat`, but radar and base map are
+NOT the same pyramid and must not be treated as one:
 
-- Almost the entire labelled Catalonia map (Vielha to Tarragona, Lleida to Girona) lives inside
-  one single tile, `x=64, y=80`. Don't assume neighbouring tile indices are geographically
-  adjacent to it - they aren't.
-- Tile `y=81` has a genuine ~23px solid black border baked into its top edge (verified on the raw
-  tile bytes, not a compositing artifact). Any crop reaching past `y≈80.0` shows that as a stray
-  black line.
-- Tile `y=79` contains a disconnected fragment - a "Tortosa" label next to the meteo.cat logo over
-  open sea - that does not geographically connect to what's south of it in tile `y=80`. It's most
-  likely leftover branding/placeholder content for out-of-range tiles, not real northward
-  continuation. Treat content there as untrustworthy for framing purposes.
+- **Radar** (`radarTileURL`) only exists at **z=7** (`RadarGrid`: x 63...68, y 78...83; some of
+  those indices 404 and are silently skipped - kept for margin, not all are valid). Confirmed
+  there is no z=8 radar endpoint (404). Its tile y increases **southward**.
+- **Base map** (`fonsTileURL`, `GoogleMapsCompatible`) exists at both z=7 and z=8, and these are
+  two *different, unrelated* images, not two levels of the same pyramid:
+  - z=7 (the grid this app used to use for the base map too) is a small pre-rendered widget image
+    chopped into a 6x6 tile grid, **not a continuous geographic pyramid**. Almost the entire
+    labelled Catalonia map (Vielha to Tarragona, Lleida to Girona) lives inside one single tile,
+    `x=64, y=80`; a "Tortosa" fragment next to the meteo.cat logo sits disconnected in tile `y=79`
+    (leftover branding, not real geography); tile `y=81` has a genuine ~24px solid black border
+    baked into its very first row. Net effect: this grid cannot show Terres de l'Ebre at all -
+    real content runs to the *literal last pixel row* of tile `y=80` with zero margin before that
+    black border. This grid is no longer used for the base map, only kept as historical context.
+  - z=8 (`BaseGrid`, what `RadarCompositor` uses now) **is** a real, continuous projection: it
+    contains Terres de l'Ebre/Tortosa correctly, continuous with the rest of Catalonia, no black
+    border, no disconnected fragment. Its tile y increases **northward** - opposite of both the
+    radar grid and the old z=7 base grid. This was discovered and verified by loading Meteocat's
+    own `ginys/mapaRadar` widget in a real browser (Chrome DevTools MCP), reading the network log
+    for the exact tiles it fetches, and replicating that compositing ourselves pixel-for-pixel
+    before touching any code - don't trust a formula for this source, verify by rendering.
 
-Net effect: Tortosa is not reachable with a label inside this tile grid without either showing the
-black border (going south past `y=80.0`) or the disconnected branding fragment (going further
-north than the real map, past `y≈79.0`). `RadarCompositor.catalunyaTileX`/`catalunyaTileY` are
-tuned by eye against the debug PNG for this reason, not derived from a formula - see the comment
-above those constants for the current values and the margins they were chosen for. If Meteocat's
-tile set changes, redo this by eye, not by recomputing from lat/lon.
+Because radar only exists at z=7 and the base map now uses z=8, `RadarCompositor.compositeFrame`
+draws each radar tile **scaled 2x** onto the z=8 canvas (standard XYZ nesting: base tile `(X,Y)` is
+a child of radar tile `(X/2, Y/2)`) - see the code comment there for the exact anchor math, which
+must account for the two grids' opposite y-directions. `catalunyaTileX`/`catalunyaTileY` (in
+`BaseGrid`'s coordinate space now, not `RadarGrid`'s) are tuned against pixel measurements of the
+debug PNG, not derived from a formula - see the comment above those constants. If Meteocat's tile
+set changes, redo this by rendering the real widget and measuring again, not by recomputing from
+lat/lon (the tile-index-to-lat/lon relationship for these grids is not standard Web Mercator).
 
 ## Coordinate convention in RadarCompositor
 
