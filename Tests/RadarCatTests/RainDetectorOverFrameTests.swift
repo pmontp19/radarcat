@@ -46,4 +46,27 @@ import CoreGraphics
         }
         #expect(RainDetector.maxSeverityOverFrame(in: image) == .hail)
     }
+
+    /// Regressió del bug real que va motivar el pas a components connexos
+    /// (vegeu el comentari de `maxSeverityOverFrame`): moltes taques dobles
+    /// disperses arreu del frame, cap d'elles a prop de cap altra (separades
+    /// per 3 passos de graella = 12px, molt més que la distància 8-connectada
+    /// d'1 pas), simulant l'eco feble i escampat d'un dia pràcticament sec.
+    /// Amb la lògica ACUMULATIVA anterior, el recompte total (10 mostres)
+    /// hauria superat el llindar (6) i hauria tornat `.weak` fals; amb
+    /// components connexos cap clúster individual (mida 1) hi arriba.
+    @Test func manyScatteredIsolatedBluePixelsAreNotSignificantRain() {
+        let scatteredGridPoints: Set<[Int]> = [
+            [0, 0], [0, 3], [0, 6], [0, 9],
+            [3, 0], [3, 3], [3, 6], [3, 9],
+            [6, 0], [6, 3],
+        ]
+        let image = TestImage.make(width: 60, height: 60) { x, y in
+            guard x % 4 == 0, y % 4 == 0, scatteredGridPoints.contains([y / 4, x / 4]) else {
+                return (128, 128, 128)
+            }
+            return (0, 0, 255)   // blau = feble
+        }
+        #expect(RainDetector.maxSeverityOverFrame(in: image) == .none)
+    }
 }

@@ -12,12 +12,31 @@ import SwiftUI
 /// blau de Maps del punt d'ubicació, a `MapOverlays.swift`) perquè aquests
 /// són la pròpia llegenda de colors de Meteocat, no un color de superfície
 /// de la interfície.
+///
+/// Construïts amb `Color(hue:saturation:brightness:)`, NO amb els colors amb
+/// nom (`.blue`, `.cyan`, `.green`...) que hi havia abans: aquells són colors
+/// DINÀMICS del sistema, amb un RGB diferent en clar i en fosc (p.ex.
+/// `.systemYellow` és més clar/saturat en fosc que en clar) - `RadarCompositor
+/// .compositeFrame` dibuixa el radar SEMPRE igual, sense cap filtre
+/// d'aparença (vegeu el comentari allà), així que en fosc la llegenda amb
+/// colors amb nom acabava mostrant un to lleugerament diferent del que hi ha
+/// de veritat als píxels de l'eco. Un `Color(hue:...)` és un valor de color
+/// fix, idèntic en totes dues aparences - igual que ho és el radar mateix.
+/// Cada to escollit dins la mateixa banda que `RainDetector.severity(r:g:b:)`
+/// hi classificaria (feble 170°...300°, moderada 45°...170°, forta
+/// 345°...45°, calamarsa 300°...345°): la llegenda i el detector llegeixen el
+/// mateix mapa de colors.
 struct LegendView: View {
     private let barWidth: CGFloat = 96
 
     private let gradientColors: [Color] = [
-        .blue, .cyan, .green, .yellow, .orange, .red,
-        Color(red: 1, green: 0, blue: 1),   // magenta - calamarsa
+        Color(hue: 232 / 360, saturation: 0.85, brightness: 0.95),   // blau - feble (inici)
+        Color(hue: 190 / 360, saturation: 0.80, brightness: 0.85),   // cian - feble (fi)
+        Color(hue: 130 / 360, saturation: 0.70, brightness: 0.75),   // verd - moderada (inici)
+        Color(hue: 54 / 360, saturation: 0.90, brightness: 0.95),    // groc - moderada (fi)
+        Color(hue: 30 / 360, saturation: 0.90, brightness: 0.95),    // taronja - forta (inici)
+        Color(hue: 3 / 360, saturation: 0.85, brightness: 0.90),     // vermell - forta (fi)
+        Color(hue: 312 / 360, saturation: 0.75, brightness: 0.95),   // magenta - calamarsa
     ]
 
     var body: some View {

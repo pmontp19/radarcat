@@ -92,54 +92,105 @@ enum RainDetector {
     /// Mateix mostreig que abans feia servir `hasSignificantRain` (pas de 4
     /// píxels - als ecos de radar, escala molt més gran que 4px, no se'ls
     /// escapa cap taca real, i és prou barat per cridar-se cada cicle de
-    /// refresc) i el mateix llindar anti-soroll (proporcional a les mostres
-    /// VÀLIDES, és a dir sense comptar les descartades per
+    /// refresc). El llindar de mostres és el mateix d'abans (proporcional a
+    /// les mostres VÀLIDES, sense comptar les descartades per
     /// `attributionRectNormalized`, amb un mínim absolut de 6 perquè en
-    /// frames petits una fracció microscòpica no quedi arrodonida a zero),
-    /// però aplicat de manera ACUMULATIVA per nivell: es compta, de
-    /// `.hail` cap avall, quantes mostres vàlides són "aquest nivell o
-    /// pitjor", i es retorna el primer (més alt) nivell el recompte
-    /// acumulat del qual arriba al llindar. Acumular en lloc de comptar
-    /// cada nivell tot sol resol dos problemes de cop:
+    /// frames petits una fracció microscòpica no quedi arrodonida a zero) -
+    /// el que ha canviat és QUÈ ha d'arribar-hi.
+    ///
+    /// Abans es sumava el recompte de mostres "aquest nivell o pitjor" de
+    /// TOT el frame (acumulatiu de `.hail` cap avall). Això va resultar
+    /// massa permissiu a la mida real d'un frame: una dotzena de taques
+    /// febles i disperses arreu de Catalunya (cap d'elles, per separat, prou
+    /// gran per dir res) sumaven per separat prou mostres com per arribar al
+    /// llindar total i la línia d'estat deia "Pluja feble a Catalunya" amb
+    /// un cel pràcticament net. Ara, per a cada nivell, es busca el
+    /// COMPONENT CONNEX (8-connectat, vegeu `largestClusterSize`) més gran
+    /// de mostres "aquest nivell o pitjor", i és la MIDA D'AQUEST ÚNIC
+    /// CLÚSTER (no la suma de tots els clústers del frame) la que s'ha de
+    /// comparar amb el llindar: només un sol tram contigu d'eco prou gran
+    /// compta, no muntanya de taques dissortades escampades. Això resol el
+    /// mateix problema de dos que abans resolia l'acumulació:
     /// - Un artefacte de vora o un únic píxel de compressió classificat per
-    ///   atzar com `.hail` no fa que tot el frame "s'ensumi" calamarsa: el
-    ///   recompte de NOMÉS `.hail` no arriba al llindar, i cau al nivell
-    ///   real de sota.
+    ///   atzar com `.hail` segueix sense fer que tot el frame "s'ensumi"
+    ///   calamarsa: un clúster de mida 1 no arriba mai al llindar.
     /// - Un eco real sol tenir una zona central més forta envoltada de tons
-    ///   més febles, no un bloc uniforme d'un sol color: uns quants píxels
-    ///   de cada nivell (moderat + fort + calamarsa) que, comptats cada un
-    ///   tot sol, no arriben al llindar, sí que hi arriben comptats junts
-    ///   ("moderat o pitjor").
+    ///   més febles, formant un ÚNIC bloc contigu (el nucli fort i l'anell
+    ///   feble es toquen): el component connex de "moderat o pitjor" hi
+    ///   inclou totes dues zones juntes, igual que abans ho feia la suma.
     static func maxSeverityOverFrame(in image: CGImage) -> RainSeverity {
         guard let buffer = PixelBuffer(image) else { return .none }
         let exclude = attributionRectPx(for: image)
         let step = 4
-        var validSamples = 0
-        // Recompte EXACTE per nivell (índex = `RainSeverity.rawValue`);
-        // `exactCounts[.none.rawValue]` no s'usa mai per decidir res.
-        var exactCounts = [Int](repeating: 0, count: 5)
+        let cols = (image.width + step - 1) / step
+        let rows = (image.height + step - 1) / step
 
+        // Graella de severitats reals mostrejades, índex `row * cols + col`.
+        // `-1` (per sota de `RainSeverity.none.rawValue == 0`) marca una
+        // mostra invàlida (dins `exclude`): així mai compta per a cap nivell
+        // NI actua de pont de connectivitat entre dos clústers reals que la
+        // insígnia separi per pur atzar de posició.
+        var grid = [Int](repeating: -1, count: rows * cols)
+        var validSamples = 0
+
+        var row = 0
         var y = 0
         while y < image.height {
+            var col = 0
             var x = 0
             while x < image.width {
-                defer { x += step }
+                defer { x += step; col += 1 }
                 if let exclude, exclude.contains(CGPoint(x: Double(x), y: Double(y))) { continue }
                 validSamples += 1
                 if let (r, g, b) = buffer.rgb(x: x, y: y) {
-                    exactCounts[severity(r: r, g: g, b: b).rawValue] += 1
+                    grid[row * cols + col] = severity(r: r, g: g, b: b).rawValue
                 }
             }
             y += step
+            row += 1
         }
 
         let threshold = max(6, Int((Double(validSamples) * 0.003).rounded(.up)))
-        var cumulative = 0
         for level in stride(from: RainSeverity.hail.rawValue, through: RainSeverity.weak.rawValue, by: -1) {
-            cumulative += exactCounts[level]
-            if cumulative >= threshold { return RainSeverity(rawValue: level)! }
+            if largestClusterSize(grid: grid, rows: rows, cols: cols, atLeast: level) >= threshold {
+                return RainSeverity(rawValue: level)!
+            }
         }
         return .none
+    }
+
+    /// Mida del component connex (8-connectat: també compten els veïns en
+    /// diagonal, perquè un eco real no dibuixa una graella perfectament
+    /// alineada als eixos) més gran dins `grid` on tots els punts tenen
+    /// severitat `>= level`. Cerca en amplada iterativa (una pila explícita,
+    /// no recursió) sobre TOTA la graella - com a màxim es crida un cop per
+    /// nivell (4 cops com a molt) per frame, cost menyspreable comparat amb
+    /// descarregar/compondre els tiles del mateix frame.
+    private static func largestClusterSize(grid: [Int], rows: Int, cols: Int, atLeast level: Int) -> Int {
+        var visited = [Bool](repeating: false, count: grid.count)
+        var best = 0
+        var stack: [Int] = []
+        for start in 0..<grid.count where grid[start] >= level && !visited[start] {
+            visited[start] = true
+            stack.append(start)
+            var size = 0
+            while let idx = stack.popLast() {
+                size += 1
+                let r = idx / cols, c = idx % cols
+                for dr in -1...1 {
+                    for dc in -1...1 where dr != 0 || dc != 0 {
+                        let nr = r + dr, nc = c + dc
+                        guard nr >= 0, nr < rows, nc >= 0, nc < cols else { continue }
+                        let nIdx = nr * cols + nc
+                        guard !visited[nIdx], grid[nIdx] >= level else { continue }
+                        visited[nIdx] = true
+                        stack.append(nIdx)
+                    }
+                }
+            }
+            best = max(best, size)
+        }
+        return best
     }
 
     /// `true` si hi ha un eco significatiu (>= `.moderate`) en algun lloc del

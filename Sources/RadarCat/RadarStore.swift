@@ -180,6 +180,29 @@ final class RadarStore {
                 await self.enqueueRainStateUpdate()
             }
         }
+        // Canviar de tema al menú "⋯" ha de recompondre els frames a
+        // l'instant, amb el popover ja obert - vegeu el comentari a
+        // `AppearancePreference.onModeChange` sobre per què calia aquest
+        // ganxo explícit en lloc de confiar només en
+        // `MenuBarContentView.onChange(of: colorScheme)` (que no es
+        // dispara amb la vista ja muntada quan qui canvia l'aparença és
+        // codi imperatiu fora de SwiftUI, `NSApp.appearance`). "Sistema" es
+        // resol contra l'aparença REAL del sistema en aquest instant
+        // (`currentSystemAppearance()`, mateixa font que a l'`init`) -
+        // `FrameAppearance` només té `.light`/`.dark`, mai un tercer cas
+        // "segueix el sistema".
+        AppearancePreference.shared.onModeChange = { [weak self] mode in
+            Task { @MainActor in
+                guard let self else { return }
+                let resolved: FrameAppearance
+                switch mode {
+                case .system: resolved = Self.currentSystemAppearance()
+                case .light: resolved = .light
+                case .dark: resolved = .dark
+                }
+                await self.setAppearance(resolved)
+            }
+        }
         // Si els avisos ja estaven actius d'una sessió anterior, cal
         // reengegar la ubicació: `requestPermissionAndStart()` amb el
         // permís ja concedit no ensenya cap diàleg (vegeu
@@ -212,6 +235,29 @@ final class RadarStore {
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    /// Interval mínim entre refrescos disparats per OBRIR el popover
+    /// (`refreshIfNeededOnAppear`, no pas el timer periòdic de dalt de 6
+    /// min): prou curt perquè obrir el popover després d'una estona mostri
+    /// dades fresques a l'instant en lloc d'esperar el cicle sencer, prou
+    /// llarg perquè obrir/tancar-lo diverses vegades seguides (o un doble
+    /// clic per accident a la icona de la barra de menú) no dispari una
+    /// crida de xarxa nova cada cop.
+    private static let openRefreshMinInterval: TimeInterval = 90
+
+    /// Crida des de `MenuBarContentView` cada cop que el popover apareix
+    /// (dins el mateix `.task` que ja crida `setAppearance`): refresca NOMÉS
+    /// si ha passat prou estona des de l'últim intent, encertat o no
+    /// (`lastRefreshAttempt`, no `lastUpdated` - un refresc que ha fallat fa
+    /// 10 segons no s'ha de reintentar a l'instant només perquè l'usuari ha
+    /// tornat a obrir el popover). `nil` (mai s'ha intentat cap refresc)
+    /// sempre en dispara un.
+    func refreshIfNeededOnAppear() async {
+        if let lastRefreshAttempt, Date().timeIntervalSince(lastRefreshAttempt) < Self.openRefreshMinInterval {
+            return
+        }
+        await refresh()
     }
 
     func refresh() async {

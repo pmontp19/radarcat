@@ -2,33 +2,41 @@ import SwiftUI
 
 /// Cronologia: substitueix el `Slider` de pista blava plena i el comptador
 /// "5/10" d'abans. Sense `Slider`: el scrub es fa arrossegant directament
-/// sobre la fila de marques (`TimelineTrackView`, que en concentra tota la
-/// lògica). Vegeu `popover-ui-spec.md` secció 3.
+/// sobre la pista contínua (`TimelineTrackView`, que en concentra tota la
+/// lògica). Disposició en dues files (informació a dalt, pista a sota tot
+/// l'ample), com el control de precipitació del Temps d'Apple - abans tot
+/// vivia en una sola fila (play + pista + hora) i la fila de marques no
+/// s'assemblava al control natiu que demanava l'spec. Vegeu
+/// `popover-ui-spec.md` secció 3.
 struct TimelineView: View {
     @Environment(RadarStore.self) private var store
 
     var body: some View {
         let animator = store.animator
-        HStack(spacing: 9) {
-            playPauseButton(animator: animator)
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 9) {
-                TimelineTrackView(animator: animator)
+                playPauseButton(animator: animator)
+                Spacer(minLength: 8)
                 frameTimestamp(animator: animator)
             }
-            // Un sol element combinat: la pista de marques, les etiquetes
-            // dels extrems i el segell de l'hora expliquen tots la mateixa
-            // cosa (quin frame es veu ara) - agrupar-los evita que VoiceOver
-            // ho repeteixi tres cops.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Cronologia del radar")
-            .accessibilityValue(frameAccessibilityValue(animator: animator))
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: animator.step(by: 1)
-                case .decrement: animator.step(by: -1)
-                @unknown default: break
+            TimelineTrackView(animator: animator)
+                // Un sol element combinat: la pista i el segell de l'hora
+                // (`frameTimestamp`, amagat de VoiceOver més avall) expliquen
+                // tots dos quin frame es veu ara - agrupar-los evita que
+                // VoiceOver ho repeteixi dos cops. Les etiquetes dels
+                // extrems de la pista SÍ hi entren (no estan amagades), però
+                // són prou curtes que no dupliquen res, només hi afegeixen
+                // context.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Cronologia del radar")
+                .accessibilityValue(frameAccessibilityValue(animator: animator))
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: animator.step(by: 1)
+                    case .decrement: animator.step(by: -1)
+                    @unknown default: break
+                    }
                 }
-            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 9)
@@ -56,23 +64,34 @@ struct TimelineView: View {
     /// L'ÚNICA hora que reflecteix el frame en reproducció (mai etiquetada
     /// com a "darrera imatge", que és cosa de `StatusHeaderView`). Al frame
     /// més nou NOMÉS es mostra l'hora, sense segona línia: "Ara" ja hi surt
-    /// a la dreta de la fila d'etiquetes de la pista (`TimelineTrackView`) -
-    /// repetir-lo aquí llegia com un duplicat ("11:18 / Ara" al costat
-    /// d'"Ara"). El desplaçament relatiu ("−N min") només aporta res quan NO
-    /// s'és al frame més nou.
+    /// a la pista de sota (`TimelineTrackView`) - repetir-lo aquí llegia com
+    /// un duplicat ("11:18 / Ara" al costat d'"Ara"). El desplaçament
+    /// relatiu ("−N min") només aporta res quan NO s'és al frame més nou.
+    ///
+    /// La segona línia SEMPRE ocupa el mateix espai, buida o no (text " "
+    /// amb opacitat 0 en lloc de fer desaparèixer la línia sencera): abans,
+    /// quan `relative` passava de buit a no-buit en arrossegar, aquest bloc
+    /// canviava d'1 a 2 línies d'alçada i, com que vivia en una `HStack`
+    /// amb el botó de play (alineació `.center` per defecte), tot plegat -
+    /// botó inclòs - saltava amunt/avall a cada canvi. Reservar l'alçada
+    /// sempre elimina el salt sense necessitat de fixar cap alineació
+    /// explícita.
     private func frameTimestamp(animator: RadarAnimator) -> some View {
         let relative = frameRelativeLabel(animator: animator)
         return VStack(alignment: .trailing, spacing: 1) {
             Text(animator.currentTimestamp?.hourMinuteLabel ?? "—")
                 .font(.system(size: 11.5, weight: .semibold))
                 .monospacedDigit()
-            if !relative.isEmpty {
-                Text(relative)
-                    .font(.system(size: 9))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
+            Text(relative.isEmpty ? " " : relative)
+                .font(.system(size: 9))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .opacity(relative.isEmpty ? 0 : 1)
         }
+        // El seu contingut ja forma part de `frameAccessibilityValue`, llegit
+        // com a part de l'element combinat de la pista (vegeu més amunt) -
+        // sense amagar-lo aquí, VoiceOver el llegiria dues vegades.
+        .accessibilityHidden(true)
     }
 
     /// Buit al frame més nou (vegeu `frameTimestamp`): buit, no "Ara". Es

@@ -10,7 +10,7 @@ a 10-frame animation (`RadarAnimator`) built every refresh cycle (`RadarStore`, 
 
 ## Build, run, verify (no Xcode)
 
-- `swift build` - compiles. `swift test` - 26 tests of the pure logic (hue classification, radius
+- `swift build` - compiles. `swift test` - 27 tests of the pure logic (hue classification, radius
   sampling, badge exclusion, alert hysteresis). They are the only automated check; keep them green.
 - **When several agents work in this tree at once, build with `--scratch-path <tmp dir>`.** A shared
   `.build` produced a *stale binary* under concurrent SwiftPM invocations (caught only because the debug
@@ -23,12 +23,19 @@ a 10-frame animation (`RadarAnimator`) built every refresh cycle (`RadarStore`, 
   without killing/relaunching. Use this only if you need the `.app` bundle without running it.
 - There is no automated visual test. `RadarCompositor.compositeFrame` ends with a debug line,
   `Self.savePNG(out, to: "/Users/pere/Desktop/radarcat_appframe.png")`, that dumps every composited
-  frame to disk - opening the popover (or just launching, since `RadarStore.init` refreshes
-  immediately) rewrites it. Framing/orientation changes must be verified by reading that PNG as an
-  image and, for anything animation-related, by actually watching the popover (it's a distinct
-  code path only in the sense that `RadarAnimator` calls `compositeFrame` repeatedly - same
-  renderer, so if the debug PNG is right the animation is right, but watch it once to be sure).
-  Leave the `savePNG` line in place; it's the only verification hook this project has.
+  frame to disk. **It only fires from `RadarAnimator.build()`** (a refresh with a new timestamp, an
+  appearance change, or launch, since `RadarStore.init` refreshes immediately) - `build()` calls
+  `compositeFrame` once per frame in the batch (10x) and each call overwrites this same file, so
+  after a build settles the PNG on disk is always the LAST (newest-timestamp) frame of that batch,
+  never an older one. Playback (`RadarAnimator.advance()`/`seek(to:)`/`step(by:)`) does NOT recall
+  `compositeFrame` at all - it only cycles `currentIndex` over already-built `NSImage`s already held
+  in memory, so **the file does not update while the popover is just animating or being scrubbed**;
+  it changes again only on the next real rebuild. Watching a *live* appearance/theme change land
+  (not just framing) needs either the popover itself or polling this file's mtime after triggering a
+  rebuild, not "let it animate and see if the PNG moves". Framing/orientation changes must be
+  verified by reading the PNG as an image; for anything animation-related, actually watch the
+  popover once too (same renderer per frame, so if the debug PNG is right the animation is right,
+  but confirm). Leave the `savePNG` line in place; it's the only verification hook this project has.
 
 ## Tile sources: two different grids, two different zoom levels
 
@@ -130,6 +137,24 @@ for this. The badge stays visible on purpose: it is the source attribution.
   or as a raw binary, so it is the signature, not `LSUIElement` or the launch method. Empirically
   CoreLocation also yields no fix for these builds, so the location dot, the alert radius and the
   notification path all need a real Developer ID (`APP_IDENTITY` in `package_app.sh`) to test end to end.
+  Running the truly **unsigned** `.build/debug/RadarCat` binary directly (skipping `package_app.sh`
+  entirely, e.g. for a quick iteration loop) is worse than the ad-hoc case above: `UNUserNotificationCenter
+  .current()` itself throws an uncaught `NSInternalInconsistencyException` ("bundleProxyForCurrentProcess
+  is nil") and kills the whole process the moment `enableAlerts()` runs - not a graceful error code. Keep
+  "Avisos de pluja" off while driving a raw debug binary, or launch through `compile_and_run.sh` instead.
+- **A user-chosen theme (`AppearancePreference`, the "⋯" menu's Tema submenu) must be applied via
+  `NSApplication.shared.appearance`, not `.preferredColorScheme`.** Tried first and reverted: forcing
+  `.preferredColorScheme` on `MenuBarContentView` changed nothing real - not the header's `.thinMaterial`
+  (reads the actual `NSWindow`/`NSPanel` appearance behind a `MenuBarExtra(.window)` popover, not a
+  SwiftUI environment value declared from inside it), nor anything else. `NSApp.appearance` does propagate
+  to real window/material appearance. Even with that, `@Environment(\.colorScheme)` on an ALREADY-mounted
+  view does not reactively re-evaluate just because outside code pokes `NSApp.appearance` - confirmed live
+  with the popover held open: the chrome repainted (any redraw samples the current effective appearance)
+  but `RadarStore`'s composited frame did not, because it depends on `MenuBarContentView.onChange(of:
+  colorScheme)` firing, which it doesn't in this case. Fixed with an explicit `AppearancePreference
+  .onModeChange` callback (same pattern as `AlertPreferences.onEnabledChange`) that `RadarStore` hooks in
+  its `init` to call `setAppearance` directly - never rely on `colorScheme` alone to notice an
+  imperative, non-SwiftUI appearance change on a view that's already on screen.
 
 ## Maintaining this file
 
