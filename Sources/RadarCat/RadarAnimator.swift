@@ -71,6 +71,38 @@ final class RadarAnimator {
         if !built.isEmpty { play() }             // auto-reprodueix
     }
 
+    /// Recompon els frames JA existents (mateixos timestamps) en una aparença
+    /// nova - a diferència de `build`, no hi ha dades noves, així que
+    /// `currentIndex` NO canvia (l'usuari no ha de perdre la posició on
+    /// estava mirant només perquè ha canviat de tema).
+    ///
+    /// El frame que s'està VEIENT ara mateix es recompon PRIMER i se
+    /// substitueix a l'instant; la resta es va recomponent en segon pla
+    /// mentre l'usuari ja veu alguna cosa correcta. Abans, `setAppearance`
+    /// cridava `build` sencer per a un canvi de tema: els 10 frames es
+    /// recomponien tots abans d'assignar res, així que la imatge trigava
+    /// (network ja cachejada, però encara calen ~10 composicions
+    /// seqüencials de CPU) a canviar - visible en viu com un canvi de tema
+    /// que "es queda penjat" un moment abans de saltar.
+    func recolor(appearance: FrameAppearance) async {
+        guard !frames.isEmpty else { return }
+        let wasPlaying = isPlaying
+        pause()
+
+        let shownIndex = min(currentIndex, frames.count - 1)
+        if let cg = await compositor.compositeFrame(timestamp: frames[shownIndex].timestamp, appearance: appearance) {
+            frames[shownIndex].image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        }
+
+        for i in frames.indices where i != shownIndex {
+            let ts = frames[i].timestamp
+            let cg = await compositor.compositeFrame(timestamp: ts, appearance: appearance)
+            frames[i].image = cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        }
+
+        if wasPlaying { play() }
+    }
+
     func play() {
         guard !frames.isEmpty else { return }
         guard !isPlaying else { return }

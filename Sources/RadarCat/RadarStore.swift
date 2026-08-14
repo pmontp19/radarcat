@@ -309,8 +309,13 @@ final class RadarStore {
     func setAppearance(_ newAppearance: FrameAppearance) async {
         guard newAppearance != appearance else { return }
         appearance = newAppearance
-        guard let latest = latestTimestamp else { return }
-        await enqueueRebuild(latest: latest)
+        guard latestTimestamp != nil else { return }
+        // `enqueueAppearanceUpdate`, NO `enqueueRebuild`: no hi ha cap
+        // timestamp nou, només un canvi d'aparença sobre els mateixos 10
+        // frames - `RadarAnimator.recolor` mostra el frame vigent a
+        // l'instant en lloc d'esperar que es recomponguin tots deu (vegeu el
+        // comentari allà).
+        await enqueueAppearanceUpdate(newAppearance)
     }
 
     /// Únic punt que demana permisos (P0 de l'spec): ubicació primer, que és
@@ -363,6 +368,20 @@ final class RadarStore {
         let task = Task {
             await previous?.value
             await animator.build(latest: latest, appearance: currentAppearance)
+        }
+        pendingRebuild = task
+        await task.value
+    }
+
+    /// Mateix encadenament que `enqueueRebuild`, sobre la mateixa cua
+    /// (`pendingRebuild`): un canvi de tema i un refresc de dades gairebé
+    /// simultanis també podrien entrellaçar-se escrivint `animator.frames` a
+    /// mitges si no compartissin la mateixa serialització.
+    private func enqueueAppearanceUpdate(_ newAppearance: FrameAppearance) async {
+        let previous = pendingRebuild
+        let task = Task {
+            await previous?.value
+            await animator.recolor(appearance: newAppearance)
         }
         pendingRebuild = task
         await task.value
