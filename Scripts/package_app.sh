@@ -11,6 +11,7 @@ MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-14.0}
 MENU_BAR_APP=${MENU_BAR_APP:-0}
 SIGNING_MODE=${SIGNING_MODE:-}
 APP_IDENTITY=${APP_IDENTITY:-}
+LOCATION_USAGE_DESCRIPTION=${LOCATION_USAGE_DESCRIPTION:-"RadarCat només demana la teva ubicació si actives els avisos de pluja (opcionals) als Ajustos, per situar-te al mapa i avisar-te quan comenci a ploure a prop teu."}
 
 if [[ -f "$ROOT/version.env" ]]; then
   source "$ROOT/version.env"
@@ -62,6 +63,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>${MACOS_MIN_VERSION}</string>
     <key>LSUIElement</key><${LSUI_VALUE}/>
+    <key>NSLocationWhenInUseUsageDescription</key><string>${LOCATION_USAGE_DESCRIPTION}</string>
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>BuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>
     <key>GitCommit</key><string>${GIT_COMMIT}</string>
