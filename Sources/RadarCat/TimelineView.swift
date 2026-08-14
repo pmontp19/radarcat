@@ -20,15 +20,22 @@ struct TimelineView: View {
                 frameTimestamp(animator: animator)
             }
             TimelineTrackView(animator: animator)
-                // Un sol element combinat: la pista i el segell de l'hora
-                // (`frameTimestamp`, amagat de VoiceOver més avall) expliquen
-                // tots dos quin frame es veu ara - agrupar-los evita que
-                // VoiceOver ho repeteixi dos cops. Les etiquetes dels
-                // extrems de la pista SÍ hi entren (no estan amagades), però
-                // són prou curtes que no dupliquen res, només hi afegeixen
-                // context.
+                // Un sol element combinat: `.accessibilityElement(children:
+                // .ignore)` DESCARTA tot el contingut descendent de
+                // `TimelineTrackView` de cara a VoiceOver (les etiquetes
+                // "12:24"/"Ara" dels extrems de la pista INCLOSES - no
+                // "s'ignoren els fills però es filtren cap amunt", com deia
+                // una versió anterior d'aquest comentari; l'API realment vol
+                // dir "no hi ha fills", punt). Per no perdre de tot la
+                // referència de l'hora d'inici, el `accessibilityLabel`
+                // l'incorpora com a text estàtic (s'anuncia un cop en
+                // enfocar, no a cada canvi de valor); l'hora del frame
+                // vigent i si és "ara" o "fa N minuts" viuen a
+                // `accessibilityValue` (es torna a anunciar cada cop que
+                // `frameAccessibilityValue` canviï, en ajustar amb
+                // VoiceOver).
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Cronologia del radar")
+                .accessibilityLabel("Cronologia del radar, de \(earliestAbsoluteLabel(animator: animator)) a ara")
                 .accessibilityValue(frameAccessibilityValue(animator: animator))
                 .accessibilityAdjustableAction { direction in
                     switch direction {
@@ -104,6 +111,14 @@ struct TimelineView: View {
         else { return "" }
         let minutes = max(0, Int(latest.timeIntervalSince(current) / 60))
         return "−\(minutes) min"
+    }
+
+    /// Hora real del primer frame, per al `accessibilityLabel` de la pista -
+    /// mateixa font que `TimelineTrackView.earliestLabel` (privada allà),
+    /// duplicada aquí perquè és una sola línia i no val la pena exposar-la
+    /// només per aquest ús.
+    private func earliestAbsoluteLabel(animator: RadarAnimator) -> String {
+        animator.frames.first?.timestamp.hourMinuteLabel ?? "?"
     }
 
     private func frameAccessibilityValue(animator: RadarAnimator) -> String {

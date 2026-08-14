@@ -10,7 +10,7 @@ a 10-frame animation (`RadarAnimator`) built every refresh cycle (`RadarStore`, 
 
 ## Build, run, verify (no Xcode)
 
-- `swift build` - compiles. `swift test` - 27 tests of the pure logic (hue classification, radius
+- `swift build` - compiles. `swift test` - 28 tests of the pure logic (hue classification, radius
   sampling, badge exclusion, alert hysteresis). They are the only automated check; keep them green.
 - **When several agents work in this tree at once, build with `--scratch-path <tmp dir>`.** A shared
   `.build` produced a *stale binary* under concurrent SwiftPM invocations (caught only because the debug
@@ -23,17 +23,23 @@ a 10-frame animation (`RadarAnimator`) built every refresh cycle (`RadarStore`, 
   without killing/relaunching. Use this only if you need the `.app` bundle without running it.
 - There is no automated visual test. `RadarCompositor.compositeFrame` ends with a debug line,
   `Self.savePNG(out, to: "/Users/pere/Desktop/radarcat_appframe.png")`, that dumps every composited
-  frame to disk. **It only fires from `RadarAnimator.build()`** (a refresh with a new timestamp, an
-  appearance change, or launch, since `RadarStore.init` refreshes immediately) - `build()` calls
-  `compositeFrame` once per frame in the batch (10x) and each call overwrites this same file, so
-  after a build settles the PNG on disk is always the LAST (newest-timestamp) frame of that batch,
-  never an older one. Playback (`RadarAnimator.advance()`/`seek(to:)`/`step(by:)`) does NOT recall
-  `compositeFrame` at all - it only cycles `currentIndex` over already-built `NSImage`s already held
-  in memory, so **the file does not update while the popover is just animating or being scrubbed**;
-  it changes again only on the next real rebuild. Watching a *live* appearance/theme change land
-  (not just framing) needs either the popover itself or polling this file's mtime after triggering a
-  rebuild, not "let it animate and see if the PNG moves". Framing/orientation changes must be
-  verified by reading the PNG as an image; for anything animation-related, actually watch the
+  frame to disk. **It only fires on a cache miss inside `compositeFrame`** - reached from
+  `RadarAnimator.build()` (a refresh with a new timestamp, or launch, since `RadarStore.init`
+  refreshes immediately) AND from `RadarAnimator.recolor()` (a theme change, see the appearance
+  section below) - each call overwrites this same file, so which frame ends up on disk depends on
+  which of these two ran last and in what order they visited frames, NOT always "the newest
+  timestamp": `build()` composites in chronological order so its last write genuinely is the newest
+  frame, but `recolor()` composites the currently-VIEWED frame first and the rest in plain index
+  order afterwards, so if you're viewing the newest frame when you change theme, the last write of
+  that pass is actually the *second*-newest frame. Don't assume "newest" - check `RadarAnimator
+  .currentTimestamp` (or just the timestamp printed in the popover) against what's on disk. Playback
+  (`RadarAnimator.advance()`/`seek(to:)`/`step(by:)`) does NOT recall `compositeFrame` at all - it
+  only cycles `currentIndex` over already-built `NSImage`s already held in memory, so **the file
+  does not update while the popover is just animating or being scrubbed**; it changes again only on
+  the next real rebuild or recolor. Watching a *live* appearance/theme change land (not just framing)
+  needs either the popover itself or polling this file's mtime after triggering one, not "let it
+  animate and see if the PNG moves". Framing/orientation changes must be verified by reading the PNG
+  as an image; for anything animation-related, actually watch the
   popover once too (same renderer per frame, so if the debug PNG is right the animation is right,
   but confirm). Leave the `savePNG` line in place; it's the only verification hook this project has.
 

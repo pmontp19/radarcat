@@ -38,9 +38,19 @@ struct MenuBarContentView: View {
         // periòdic de 6 min. `RadarStore` decideix si cal fer-ho de veritat
         // (llindar mínim entre obertures, vegeu aquella funció) - aquesta
         // vista no en sap res.
+        //
+        // `async let`, NO dues `await` seqüencials: toquen estats
+        // independents (aparença dels frames ja construïts vs. si cal
+        // demanar-ne uns de nous a la xarxa) i totes dues acaben passant per
+        // la mateixa cua de `RadarStore` si de veritat calen recompondre
+        // res, així que ja se serialitzen soles quan cal - fer-les
+        // seqüencials AQUÍ només retardava `refreshIfNeededOnAppear` (i,
+        // doncs, la xarxa) fins que un canvi d'aparença sencer (fins a 10
+        // recomposicions) hagués acabat, sense cap motiu real.
         .task {
-            await store.setAppearance(colorScheme == .dark ? .dark : .light)
-            await store.refreshIfNeededOnAppear()
+            async let appearanceUpdate: Void = store.setAppearance(colorScheme == .dark ? .dark : .light)
+            async let dataRefresh: Void = store.refreshIfNeededOnAppear()
+            _ = await (appearanceUpdate, dataRefresh)
         }
         .onChange(of: colorScheme) { _, newValue in
             Task { await store.setAppearance(newValue == .dark ? .dark : .light) }

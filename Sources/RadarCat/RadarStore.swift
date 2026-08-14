@@ -119,6 +119,22 @@ final class RadarStore {
 
     init(refreshInterval: TimeInterval = 6 * 60) {
         self.refreshInterval = refreshInterval
+        // Toca `AppearancePreference.shared` ABANS de llegir
+        // `currentSystemAppearance()`, no després: el seu `init` aplica el
+        // tema PERSISTIT a `NSApp.appearance` (vegeu aquella classe), i
+        // `currentSystemAppearance()` llegeix `NSApplication.shared
+        // .effectiveAppearance` - si encara no s'ha tocat `AppearancePreference`
+        // enlloc (cap altre codi n'hi ha accedit encara en aquest punt tan
+        // d'hora de l'arrencada), `effectiveAppearance` reflecteix l'aparença
+        // CRUA del sistema, no el tema que l'usuari hagi triat en una sessió
+        // anterior. Amb un tema persistit "Fosc" i el sistema real en clar,
+        // sense aquesta línia els 10 primers frames es compondrien en clar
+        // (aparença equivocada) fins que el popover s'obrís i s'autocorregís
+        // via `MenuBarContentView.onChange(of: colorScheme)` - un desajust
+        // visible just en arrencar. Un cop tocat, `AppearancePreference.init`
+        // ja ha cridat `apply()` i `effectiveAppearance` reflecteix el tema
+        // correcte (o el del sistema de veritat, si la tria és "Sistema").
+        _ = AppearancePreference.shared
         // Llegida ABANS del primer `refresh()` (i, doncs, abans del primer
         // `enqueueRebuild`), no esperant que la vista cridi `setAppearance`
         // en aparèixer: amb el sistema en fosc, sense això es compondrien els
@@ -216,8 +232,12 @@ final class RadarStore {
             location.requestPermissionAndStart()
         }
 
+        // No cal cridar `startTimer()` aquí a banda: `refresh()` ja en
+        // programa un al final (vegeu el comentari allà), incloent-hi
+        // aquesta primera crida - fer-ho també aquí només crearia un timer
+        // que el primer `refresh()` desfaria als pocs segons en substituir-
+        // lo pel seu propi.
         Task { await refresh() }
-        startTimer()
     }
 
     /// Aparença del sistema en aquest instant, llegida d'AppKit directament
@@ -228,9 +248,25 @@ final class RadarStore {
         return match == .darkAqua ? .dark : .light
     }
 
+    /// `repeats: false`, NO `true`: es reprograma tota sola des del final de
+    /// `refresh()` (encertat o no), no aquí un cop sol amb un interval fix.
+    /// Amb un `Timer` de veritat repetitiu, un refresc disparat per
+    /// `refreshIfNeededOnAppear` (obrir el popover) i el pròxim tic del
+    /// timer periòdic podien caure a pocs segons l'un de l'altre - dues
+    /// crides de xarxa real quan n'hi havia prou amb una. Reprogramant
+    /// sempre `refreshInterval` des de l'ÚLTIM refresc de veritat (sigui qui
+    /// l'hagi disparat), dos refrescos disparats pel TIMER mai cauen més a
+    /// prop l'un de l'altre que `refreshInterval`. Això NO vol dir que mai
+    /// hi hagi dos refrescos de xarxa a menys de `refreshInterval`: si
+    /// l'usuari obre el popover repetidament separat per una mica més
+    /// d'`openRefreshMinInterval` (90s, vegeu aquella constant) cada cop,
+    /// cada obertura sí dispara un refresc de veritat - això és volgut
+    /// (l'usuari torna a mirar, vol dades fresques), el que aquí es prevé
+    /// és NOMÉS la duplicació involuntària timer+obertura gairebé
+    /// simultànies, no un usuari mirant el popover sovint de veritat.
     func startTimer() {
         timer?.invalidate()
-        let t = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: refreshInterval, repeats: false) { [weak self] _ in
             Task { await self?.refresh() }
         }
         RunLoop.main.add(t, forMode: .common)
@@ -292,6 +328,11 @@ final class RadarStore {
         } catch {
             errorMessage = Self.humanize(error)
         }
+        // Reprograma el pròxim tic `refreshInterval` des d'ARA, tant si
+        // aquest refresc l'ha disparat el timer com `refreshIfNeededOnAppear`
+        // - vegeu el comentari a `startTimer` sobre per què no n'hi ha prou
+        // amb un `Timer` repetitiu de veritat.
+        startTimer()
         // Sempre, encertat o no el refresc: amb error de xarxa cal seguir
         // servint la severitat/nom calculats sobre el darrer frame vàlid en
         // lloc de deixar-los congelats des d'abans, exactament com feia
@@ -351,40 +392,50 @@ final class RadarStore {
         lastGeocodedLocation = nil
     }
 
-    /// Encadena crides a `RadarAnimator.build`: `refresh()` (timestamp nou) i
-    /// `setAppearance()` (canvi de tema) hi passen totes dues. Com que
-    /// `RadarStore` és `@MainActor` però `await` és un punt de reentrada,
-    /// dues crides gairebé simultànies (p.ex. el timer de 6 min disparant
-    /// just quan `colorScheme` canvia) podrien entrellaçar-se dins
-    /// `RadarAnimator.build` si es cridessin directament - `frames`/
-    /// `currentIndex` quedarien escrits a mitges per totes dues alhora.
-    /// Encadenar la nova crida darrere de l'anterior (llegint i assignant
-    /// `pendingRebuild` sense cap `await` entremig, així que mai hi ha una
-    /// finestra de reentrada en aquest punt concret) garanteix que mai n'hi
-    /// ha dues executant-se a la vegada.
-    private func enqueueRebuild(latest: Date) async {
+    /// Encadena `work` darrere de qualsevol crida anterior encara pendent a
+    /// la mateixa cua (`pendingRebuild`) - compartida per `enqueueRebuild` i
+    /// `enqueueAppearanceUpdate`, que només difereixen en QUÈ fan un cop els
+    /// toca el torn. Com que `RadarStore` és `@MainActor` però `await` és un
+    /// punt de reentrada, dues crides gairebé simultànies (p.ex. el timer de
+    /// 6 min disparant just quan l'usuari canvia de tema) podrien
+    /// entrellaçar-se dins `RadarAnimator.build`/`recolor` si es cridessin
+    /// directament - `frames`/`currentIndex` quedarien escrits a mitges per
+    /// totes dues alhora. Encadenar la nova crida darrere de l'anterior
+    /// (llegint i assignant `pendingRebuild` sense cap `await` entremig, així
+    /// que mai hi ha una finestra de reentrada en aquest punt concret)
+    /// garanteix que mai n'hi ha dues executant-se a la vegada.
+    private func enqueueOnRebuildQueue(_ work: @escaping () async -> Void) async {
         let previous = pendingRebuild
-        let currentAppearance = appearance
         let task = Task {
             await previous?.value
-            await animator.build(latest: latest, appearance: currentAppearance)
+            await work()
         }
         pendingRebuild = task
         await task.value
     }
 
-    /// Mateix encadenament que `enqueueRebuild`, sobre la mateixa cua
-    /// (`pendingRebuild`): un canvi de tema i un refresc de dades gairebé
-    /// simultanis també podrien entrellaçar-se escrivint `animator.frames` a
-    /// mitges si no compartissin la mateixa serialització.
+    private func enqueueRebuild(latest: Date) async {
+        let currentAppearance = appearance
+        await enqueueOnRebuildQueue { [animator] in
+            await animator.build(latest: latest, appearance: currentAppearance)
+        }
+    }
+
+    /// A diferència d'`enqueueRebuild` (sempre una feina real: un timestamp
+    /// nou sempre val la pena compondre'l), aquí es comprova QUAN TOCA EL
+    /// TORN a la cua si `newAppearance` encara és el valor vigent
+    /// (`self.appearance`) - si l'usuari ha triat un altre tema mentrestant
+    /// (p.ex. Clar, Fosc, Sistema de pressa als 3 segons), aquesta crida ja
+    /// ha quedat obsoleta i la que ve darrere seu a la cua (amb el valor de
+    /// veritat vigent) ja farà la feina real. Sense això, triar tres temes
+    /// de pressa recompondria els deu frames sencers TRES vegades seguides,
+    /// encara que només l'última importi - exactament el que `recolor`
+    /// (vegeu el comentari allà) intenta evitar en un altre sentit.
     private func enqueueAppearanceUpdate(_ newAppearance: FrameAppearance) async {
-        let previous = pendingRebuild
-        let task = Task {
-            await previous?.value
+        await enqueueOnRebuildQueue { [weak self, animator] in
+            guard let self, self.appearance == newAppearance else { return }
             await animator.recolor(appearance: newAppearance)
         }
-        pendingRebuild = task
-        await task.value
     }
 
     /// Mateix patró que `enqueueRebuild`, aplicat a `updateRainState`:

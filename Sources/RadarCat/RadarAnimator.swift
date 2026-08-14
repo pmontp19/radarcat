@@ -54,8 +54,7 @@ final class RadarAnimator {
         var built: [Frame] = []
         built.reserveCapacity(set.count)
         for (i, ts) in set.enumerated() {
-            let cg = await compositor.compositeFrame(timestamp: ts, appearance: appearance)
-            let img = cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+            let img = makeImage(await compositor.compositeFrame(timestamp: ts, appearance: appearance))
             built.append(Frame(timestamp: ts, image: img))
             buildProgress = Double(i + 1) / Double(set.count)
         }
@@ -65,6 +64,15 @@ final class RadarAnimator {
         // faria res per `guard !isPlaying` i el timer en vol seguiria comptant
         // amb l'interval de la posició antiga, saltant-se el `holdInterval`
         // del frame nou just quan més compta.
+        //
+        // Sempre salta al frame més nou i reprèn - a diferència de
+        // `recolor` (vegeu allà), que preserva `currentIndex` i només
+        // reprèn si l'usuari no ha tocat res. NO és una inconsistència
+        // per corregir: aquí hi ha dades noves de veritat (un refresc real
+        // de Meteocat), i "ara" ha canviat de debò - val la pena saltar-hi.
+        // Un canvi de tema no aporta cap dada nova, només la mateixa
+        // informació renderitzada diferent - per això `recolor` es queda on
+        // l'usuari estava mirant.
         pause()
         frames = built
         currentIndex = max(0, built.count - 1)   // mostra l'últim frame
@@ -76,34 +84,93 @@ final class RadarAnimator {
     /// `currentIndex` NO canvia (l'usuari no ha de perdre la posició on
     /// estava mirant només perquè ha canviat de tema).
     ///
-    /// El frame que s'està VEIENT ara mateix es recompon PRIMER i se
-    /// substitueix a l'instant; la resta es va recomponent en segon pla
-    /// mentre l'usuari ja veu alguna cosa correcta. Abans, `setAppearance`
-    /// cridava `build` sencer per a un canvi de tema: els 10 frames es
-    /// recomponien tots abans d'assignar res, així que la imatge trigava
-    /// (network ja cachejada, però encara calen ~10 composicions
-    /// seqüencials de CPU) a canviar - visible en viu com un canvi de tema
-    /// que "es queda penjat" un moment abans de saltar.
+    /// El frame que s'està VEIENT es recompon PRIMER i se substitueix a
+    /// l'instant; la resta es va recomponent en segon pla mentre l'usuari ja
+    /// veu alguna cosa correcta. Abans, `setAppearance` cridava `build`
+    /// sencer per a un canvi de tema: els 10 frames es recomponien tots
+    /// abans d'assignar res, així que la imatge trigava (network ja
+    /// cachejada, però encara calen ~10 composicions seqüencials de CPU) a
+    /// canviar - visible en viu com un canvi de tema que "es queda penjat"
+    /// un moment abans de saltar.
+    ///
+    /// `currentIndex` es rellegeix a CADA volta del bucle, no un cop sol a
+    /// l'inici: `TimelineTrackView.scrub` crida `seek(to:)`/`pause()`
+    /// directament (no passa per la cua de `RadarStore`), així que
+    /// l'usuari pot arrossegar la cronologia mentre aquesta funció encara
+    /// s'executa en segon pla (cada `await` és un punt de reentrada al
+    /// MainActor). Prioritzar sempre l'índex VIGENT (no el que ho era en
+    /// arrencar) evita que un frame al qual l'usuari acaba de saltar es
+    /// quedi amb l'aparença antiga fins que el bucle original hi arribi pel
+    /// seu compte. Per la mateixa raó NOMÉS es reprèn la reproducció al
+    /// final si `currentIndex` segueix sent el mateix d'on hem partit: si
+    /// l'usuari ha arrossegat mentrestant, ja ha manifestat on vol mirar
+    /// (mateix contracte que `seek`, que tampoc reprèn tot sol) i forçar
+    /// `play()` desfaria aquesta navegació manual.
+    ///
+    /// Cada composició es substitueix NOMÉS si `compositeFrame` ha tornat
+    /// una imatge de veritat - una fallada transitòria mai esborra una
+    /// imatge que ja hi havia i que anava bé (a diferència d'assignar `nil`
+    /// directament, que deixaria aquell frame en blanc fins al proper
+    /// refresc real).
     func recolor(appearance: FrameAppearance) async {
         guard !frames.isEmpty else { return }
         let wasPlaying = isPlaying
-        pause()
+        let startIndex = currentIndex
+        // `pauseInternal`, NO el `pause()` públic: aquell marca
+        // `interruptedPlaybackControl` (vegeu la propietat), i si el
+        // marquéssim aquí per la nostra pròpia pausa inicial, la condició
+        // de sota mai distingiria "l'usuari ha tocat algun control mentre
+        // recolorien" de "hem estat nosaltres pausant per començar".
+        pauseInternal()
+        interruptedPlaybackControl = false
 
-        let shownIndex = min(currentIndex, frames.count - 1)
-        if let cg = await compositor.compositeFrame(timestamp: frames[shownIndex].timestamp, appearance: appearance) {
-            frames[shownIndex].image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        var processed = Set<Int>()
+        while processed.count < frames.count {
+            let idx: Int
+            if frames.indices.contains(currentIndex), !processed.contains(currentIndex) {
+                idx = currentIndex
+            } else if let next = frames.indices.first(where: { !processed.contains($0) }) {
+                idx = next
+            } else {
+                break   // invariant del bucle diu que això no passa mai
+            }
+            processed.insert(idx)
+            let ts = frames[idx].timestamp
+            if let img = makeImage(await compositor.compositeFrame(timestamp: ts, appearance: appearance)) {
+                frames[idx].image = img
+            }
         }
 
-        for i in frames.indices where i != shownIndex {
-            let ts = frames[i].timestamp
-            let cg = await compositor.compositeFrame(timestamp: ts, appearance: appearance)
-            frames[i].image = cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
-        }
+        // Tres condicions, totes necessàries per reprendre: (1) reproduïa
+        // abans de començar, (2) `currentIndex` no ha canviat (si l'usuari
+        // ha arrossegat, ja ha triat on vol mirar - mateix contracte que
+        // `seek`, que tampoc reprèn tot sol), i (3) cap control de
+        // reproducció real (play/pausa, dreceres) s'ha tocat mentrestant -
+        // (2) per si sol NO n'hi ha prou: prémer pausa sense arrossegar no
+        // canvia `currentIndex`, però igualment expressa que l'usuari NO
+        // vol que la reproducció es reprengui tota sola en acabar.
+        if wasPlaying && currentIndex == startIndex && !interruptedPlaybackControl { play() }
+    }
 
-        if wasPlaying { play() }
+    /// `true` si `play()`/`pause()` (i, doncs, `toggle()`/`step(by:)`/
+    /// `jumpToLatest()`, que hi passen per sota) s'han cridat des de FORA
+    /// de `recolor` mentre aquesta encara s'executava en segon pla - vegeu
+    /// el comentari allà. `recolor` la reinicia a `false` just després de
+    /// la seva pròpia pausa inicial (via `pauseInternal`, que NO la marca).
+    private var interruptedPlaybackControl = false
+
+    /// `cg` -> `NSImage` conservant la mida real en punts = píxels natius
+    /// (mateixa convenció que fa servir tot el pipeline, vegeu
+    /// `RadarStageView.content`). Únic lloc que fa aquesta conversió -
+    /// `build` i `recolor` hi passen totes dues, en lloc de repetir-la
+    /// (abans hi havia tres còpies literals d'aquesta mateixa línia en
+    /// aquest fitxer, ja divergides entre elles en el tractament d'errors).
+    private func makeImage(_ cg: CGImage?) -> NSImage? {
+        cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
     }
 
     func play() {
+        interruptedPlaybackControl = true
         guard !frames.isEmpty else { return }
         guard !isPlaying else { return }
         isPlaying = true
@@ -111,6 +178,14 @@ final class RadarAnimator {
     }
 
     func pause() {
+        interruptedPlaybackControl = true
+        pauseInternal()
+    }
+
+    /// Feina real de `pause()`, sense marcar `interruptedPlaybackControl` -
+    /// `recolor` hi passa per aturar la reproducció ell mateix sense que
+    /// això compti com "l'usuari ha tocat un control".
+    private func pauseInternal() {
         isPlaying = false
         timer?.invalidate()
         timer = nil
