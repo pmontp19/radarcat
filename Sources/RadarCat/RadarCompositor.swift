@@ -30,14 +30,18 @@ actor RadarCompositor {
     /// escalant-lo x2 per encaixar amb aquesta base de z=8.
     ///
     /// Valors ajustats contra una mesura en píxels del contingut real
-    /// (fronteres/etiquetes/eco de radar) sobre aquesta graella de z=8: el
-    /// cos etiquetat de Catalunya (Vielha a les Terres de l'Ebre, Lleida a
-    /// Girona) queda aproximadament entre tile-x 128.1...130.4 i tile-y
-    /// 158.6...160.8. El rang de sota hi afegeix marge còmode a tots els
-    /// costats (una mica més al nord, on l'eco de pluja sobre Vielha
-    /// sobresurt per sobre de les fronteres administratives).
-    static let catalunyaTileX = 127.6...130.5
-    static let catalunyaTileY = 158.8...162.5
+    /// (fronteres/etiquetes) sobre aquesta graella de z=8: el cos etiquetat
+    /// de Catalunya (Vielha a les Terres de l'Ebre, Lleida a Girona) queda
+    /// aproximadament entre tile-x 128.1...130.4 i tile-y 158.6...160.8 -
+    /// això és estable (fronteres/noms no canvien), a diferència de l'eco de
+    /// pluja, que sí pot sobresortir-ne (p.ex. tempestes al Pirineu/Vall
+    /// d'Aran, just al nord del límit administratiu). El rang de sota hi
+    /// afegeix marge per l'eco de pluja a banda i banda sense allunyar la
+    /// càmera més del necessari - un primer intent més generós (127.6...
+    /// 130.5 / 158.8...162.5) deixava massa mar/muntanya buida, sobretot a
+    /// l'oest.
+    static let catalunyaTileX = 127.85...130.55
+    static let catalunyaTileY = 159.4...161.95
 
     init() {
         let cfg = URLSessionConfiguration.default
@@ -61,6 +65,18 @@ actor RadarCompositor {
         let y0 = (CGFloat(catalunyaTileY.lowerBound) - CGFloat(BaseGrid.yRange.lowerBound)) * ts
         let y1 = (CGFloat(catalunyaTileY.upperBound) - CGFloat(BaseGrid.yRange.lowerBound)) * ts
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// Aspecte (amplada/alçada) del frame compositat. `MenuBarContentView`
+    /// hi ajusta l'escenari del radar (`.aspectRatio`) en lloc de dependre
+    /// d'una alçada de finestra calculada a mà - això evitava, per
+    /// construcció, quedar-se curt o llarg i deixar bandes buides a dalt/baix
+    /// cada cop que `catalunyaTileX`/`catalunyaTileY` es retoquen. Nonisolated
+    /// perquè és static i pur (sense estat de l'actor), consultable des de
+    /// la vista sense `await`.
+    nonisolated static var catalunyaCropAspectRatio: CGFloat {
+        let crop = catalunyaCrop
+        return crop.width / crop.height
     }
 
     /// Carrega els tiles del mapa base (z=8, `BaseGrid`; cachejat, un cop per procés).

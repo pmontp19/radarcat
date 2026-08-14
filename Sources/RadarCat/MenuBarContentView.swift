@@ -52,6 +52,11 @@ struct MenuBarContentView: View {
 
     // MARK: - Escenari del radar
 
+    /// Amplada del contingut del popover. `RadarCatApp` fa servir la
+    /// mateixa constant pel seu `.frame(width:)` perquè mai puguin quedar
+    /// desincronitzades.
+    static let stageWidth: CGFloat = 380
+
     private func radarStage(animator: RadarAnimator) -> some View {
         ZStack {
             Rectangle().fill(Color.black.opacity(0.04))
@@ -69,7 +74,16 @@ struct MenuBarContentView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Alçada calculada explícitament a partir de l'amplada i de
+        // l'aspecte real del frame compositat
+        // (`RadarCompositor.catalunyaCropAspectRatio`), en lloc d'un
+        // `maxHeight: .infinity` (que s'expandia a qualsevol alçada que li
+        // deixés la finestra fixada a mà, deixant bandes negres buides a
+        // dalt/baix) o d'un `.aspectRatio(.fit)` sol (que, provat en viu,
+        // no derivava l'alçada de manera fiable dins d'aquest VStack -
+        // acabava amb la mida intrínseca petita del contingut placeholder).
+        // Calcular-ho a mà és més verbós però determinista.
+        .frame(width: Self.stageWidth, height: Self.stageWidth / RadarCompositor.catalunyaCropAspectRatio)
     }
 
     // MARK: - Controls
