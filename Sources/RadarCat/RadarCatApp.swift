@@ -3,6 +3,16 @@ import SwiftUI
 @main
 struct RadarCatApp: App {
     @State private var store = RadarStore()
+    /// Res més que instanciar-la aquí: `AppearancePreference.init` ja aplica
+    /// el tema persistit a `NSApp.appearance` tot sol (vegeu aquella
+    /// classe - NO és `.preferredColorScheme`, provat en viu i desfet: no
+    /// canviava l'aparença real de la finestra/panell que allotja el
+    /// popover d'un `MenuBarExtra(.window)`, només l'entorn SwiftUI declarat
+    /// des de dins). Cap propietat `@Bindable`/`@State` per aquest motiu:
+    /// aquest `body` no necessita re-avaluar-se quan `mode` canviï, ja que
+    /// `AppearancePreference` mateixa és qui ho aplica directament a AppKit
+    /// cada cop, no pas re-renderitzant cap vista SwiftUI.
+    private let appearancePref = AppearancePreference.shared
 
     var body: some Scene {
         MenuBarExtra {

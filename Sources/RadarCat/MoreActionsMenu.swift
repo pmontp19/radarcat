@@ -19,12 +19,30 @@ struct MoreActionsMenu: View {
     /// hi enganxa `AlertPreferences.onEnabledChange` al seu `init` - un
     /// binding directe aquí ja ho activa tot sol, sense duplicar-ho.
     @Bindable private var prefs = AlertPreferences.shared
+    /// Mateix patró `@Bindable` sobre un singleton `@Observable`, aplicat al
+    /// tema (vegeu `AppearancePreference`) - el mateix que ja fan `prefs`
+    /// aquí i `SettingsView` per `AlertPreferences.shared`.
+    @Bindable private var appearancePref = AppearancePreference.shared
 
     var body: some View {
         Menu {
             Button("Refresca") { Task { await store.refresh() } }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(store.isRefreshing)
+
+            Menu("Tema: \(appearancePref.mode.label)") {
+                ForEach(AppearancePreference.Mode.allCases, id: \.self) { mode in
+                    Button {
+                        appearancePref.mode = mode
+                    } label: {
+                        if appearancePref.mode == mode {
+                            Label(mode.label, systemImage: "checkmark")
+                        } else {
+                            Text(mode.label)
+                        }
+                    }
+                }
+            }
 
             Divider()
 
