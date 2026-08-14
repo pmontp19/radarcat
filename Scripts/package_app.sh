@@ -11,7 +11,7 @@ MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-14.0}
 MENU_BAR_APP=${MENU_BAR_APP:-0}
 SIGNING_MODE=${SIGNING_MODE:-}
 APP_IDENTITY=${APP_IDENTITY:-}
-LOCATION_USAGE_DESCRIPTION=${LOCATION_USAGE_DESCRIPTION:-"Per mostrar la teva posició al mapa del radar i avisar-te si comença a ploure on ets."}
+LOCATION_USAGE_DESCRIPTION=${LOCATION_USAGE_DESCRIPTION:-"RadarCat només demana la teva ubicació si actives els avisos de pluja (opcionals) als Ajustos, per situar-te al mapa i avisar-te quan comenci a ploure a prop teu."}
 
 if [[ -f "$ROOT/version.env" ]]; then
   source "$ROOT/version.env"

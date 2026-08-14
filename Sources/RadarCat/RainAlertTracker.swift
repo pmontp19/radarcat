@@ -6,8 +6,14 @@ import Foundation
 /// Tres proteccions, cadascuna per un motiu de soroll diferent:
 ///
 /// - Llindar de severitat (`.moderate` en amunt, no `.weak`): un traç blau/
-///   lila fluix just al píxel de l'usuari no val la pena una alarma - vegeu
-///   `RainSeverity`.
+///   lila fluix no val la pena una alarma - vegeu `RainSeverity`. Segueix
+///   tenint sentit ara que la lectura ve de `RainDetector.maxSeverity`
+///   (pitjor cas dins un radi de diversos km, no un únic píxel exacte): el
+///   llindar ja no filtra només "quin color té el meu punt", sinó "hi ha
+///   ALGUN punt del radi amb un eco prou fort" - més aviat reforça la
+///   necessitat del llindar, perquè un radi ampli (fins a 30 km) té més
+///   probabilitat d'incloure algun píxel `.weak` marginal per pur soroll de
+///   vora que un únic píxel exacte.
 /// - Histèresi de cicles secs (`dryCyclesToClear`): per tornar a "sec" (i
 ///   per tant poder re-armar una alarma futura) cal veure uns quants cicles
 ///   de refresc seguits per sota del llindar, no només un - evita que un

@@ -6,3 +6,6 @@ RadarCat.app/
 
 # macOS
 .DS_Store
+
+# Lavish review artifacts (local design review surfaces)
+.lavish/

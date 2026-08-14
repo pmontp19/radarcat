@@ -10,7 +10,11 @@ a 10-frame animation (`RadarAnimator`) built every refresh cycle (`RadarStore`, 
 
 ## Build, run, verify (no Xcode)
 
-- `swift build` - compiles. `swift test` if tests exist.
+- `swift build` - compiles. `swift test` - 26 tests of the pure logic (hue classification, radius
+  sampling, badge exclusion, alert hysteresis). They are the only automated check; keep them green.
+- **When several agents work in this tree at once, build with `--scratch-path <tmp dir>`.** A shared
+  `.build` produced a *stale binary* under concurrent SwiftPM invocations (caught only because the debug
+  PNG kept coming out at the previous frame size), which silently invalidates any visual verification.
 - `Scripts/compile_and_run.sh` - kills any running instance, builds release, packages, launches,
   and waits for the process to come up. Prefer this for iterating; it needs `APP_NAME` set
   (`BUNDLE_ID`/`MENU_BAR_APP` are read straight from the environment by `package_app.sh`, e.g.
@@ -34,6 +38,12 @@ NOT the same pyramid and must not be treated as one:
 - **Radar** (`radarTileURL`) only exists at **z=7** (`RadarGrid`: x 63...68, y 78...83; some of
   those indices 404 and are silently skipped - kept for margin, not all are valid). Confirmed
   there is no z=8 radar endpoint (404). Its tile y increases **southward**.
+- **The base map also exists at z=9, and we deliberately do NOT use it.** It is a real continuous
+  pyramid (verified), so it is tempting: twice the geometric detail. But Meteocat renders its labels at a
+  fixed *pixel* size per tile, so at z=9 the same geography carries them at half the on-screen size.
+  Measured by normalising both frames to the popover's real width (760px): at z=8 "Barcelona" is legible,
+  at z=9 it drops to ~5-6px tall and z=9 also adds many more labels that become noise at 380pt. z=9 makes
+  labels *smaller*, not sharper. Don't migrate again without re-measuring at the final display size.
 - **Base map** (`fonsTileURL`, `GoogleMapsCompatible`) exists at both z=7 and z=8, and these are
   two *different, unrelated* images, not two levels of the same pyramid:
   - z=7 (the grid this app used to use for the base map too) is a small pre-rendered widget image
@@ -69,6 +79,47 @@ own bottom-left corner in the *current* transform, so drawing under a y-flipped 
 tile upside down; that was the cause of a full vertical mirror this project shipped with once.
 Keep `catalunyaCrop` and `drawTile`'s `dx`/`dy` math in that same native space rather than
 reintroducing a display-style (top-left, y-down) flip.
+
+## Dark appearance: invert the base only, never the radar
+
+`compositeFrame(timestamp:appearance:)` renders the base tiles into their own context, inverts their
+luminance (desaturate → `CIColorInvert` → `CIToneCurve`) and only then draws the radar tiles on top,
+**unfiltered**. That order is load-bearing: `RainDetector` classifies echoes by hue, so filtering a
+flattened frame would re-map blue/weak into green/moderate and fire false alarms. The frame cache is
+keyed by timestamp *and* appearance, and `RadarStore` reads the system appearance from AppKit in its
+`init` (not from the view) so the first build already uses the right one instead of composing 10 light
+frames and then 10 dark ones.
+
+Known, accepted tradeoff, documented in the code too: inverting leaves the **sea lighter than the land**,
+the opposite of Apple Maps' dark style. A single monotonic tone curve cannot swap an ordering that
+already exists in the source (light land, mid-grey sea, dark labels) without losing the label legibility
+that inversion buys us. The curve pulls the sea down and lifts the land instead.
+
+## Anything that reads frame pixels must exclude the meteo.cat badge
+
+The base tiles have Meteocat's widget badge baked in, and its coloured squares classify as **moderate
+rain** by hue (the yellow sun is RGB 241,204,54 → hue 48°; the green one 2,135,53 → hue 143°). On a real
+frame it accounted for 70 of 94 "wet" samples - enough to claim rain over Catalonia under a clear sky.
+`RadarCompositor.attributionRectNormalized` is the measured region (with margin); `RainDetector` skips
+samples inside it and computes its noise threshold over *valid* samples only. There are regression tests
+for this. The badge stays visible on purpose: it is the source attribution.
+
+## Sharp edges in the popover UI
+
+- **Don't size the map card with `GeometryReader` + `.aspectRatio(_:contentMode:.fit)`.** Inside the
+  `MenuBarExtra` `VStack` it resolves degenerately and the card collapses to ~0pt height (shipped once
+  during this redesign, invisible in code review and in `swift build` - only launching the app showed it).
+  `RadarStageView` computes `cardWidth`/`cardHeight` explicitly from `stageWidth` and
+  `RadarFrameGeometry.aspectRatio`.
+- **`RainSeverity` has a `.none` case, so never `switch` directly over `RainSeverity?`**: `case .none`
+  would match the optional's `nil` ("we could not look") instead of "no echo".
+- Permissions are **opt-in**: nothing requests location or notifications until
+  `AlertPreferences.alertsEnabled` flips. The toggle must be a plain binding to that property - `RadarStore`
+  hangs off `onEnabledChange` and does the asking. A view that calls `store.enableAlerts()` itself asks for
+  permissions while leaving the feature off (real bug caught in review).
+- With the ad-hoc signature that `compile_and_run.sh` produces, `UserNotifications` never authorises (see
+  `RainNotifier`) and, empirically, CoreLocation yields no fix either, so the location dot and the alert
+  radius **cannot be verified with these builds** - they need a real signing identity.
 
 ## Maintaining this file
 

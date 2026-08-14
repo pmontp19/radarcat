@@ -14,6 +14,10 @@ import UserNotifications
 /// (`APP_IDENTITY` a `package_app.sh`) hauria de funcionar sense canvis
 /// aquí. Verificar-ho en dev requereix, doncs, un build signat de veritat.
 enum RainNotifier {
+    /// Només s'ha de cridar des del flux d'activació explícita de l'usuari
+    /// (`RadarStore.enableAlerts()`, en activar "Avisos de pluja" (BETA) als
+    /// Ajustos) - mai en arrencar l'app. Els avisos són opt-in: macOS no ha
+    /// de mostrar el diàleg de notificacions abans que l'usuari els demani.
     static func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
