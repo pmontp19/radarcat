@@ -117,9 +117,19 @@ for this. The badge stays visible on purpose: it is the source attribution.
   `AlertPreferences.alertsEnabled` flips. The toggle must be a plain binding to that property - `RadarStore`
   hangs off `onEnabledChange` and does the asking. A view that calls `store.enableAlerts()` itself asks for
   permissions while leaving the feature off (real bug caught in review).
-- With the ad-hoc signature that `compile_and_run.sh` produces, `UserNotifications` never authorises (see
-  `RainNotifier`) and, empirically, CoreLocation yields no fix either, so the location dot and the alert
-  radius **cannot be verified with these builds** - they need a real signing identity.
+- **`MenuBarExtra`'s label image is always forced to template rendering** (a single-tone silhouette
+  taking the system tint), regardless of `symbolRenderingMode` (`.multicolor` included),
+  `.renderingMode(.original)`, or handing it a custom-coloured `Image`/`Circle` - all tested live in the
+  real menu bar, none showed any colour. Any extra visual state for the icon has to be a **different
+  glyph**, not a colour: `RadarCatApp` swaps to `umbrella.fill` when it rains at your location and to
+  `exclamationmark.icloud.fill` when the data is stale. `.monochrome` vs `.hierarchical` look identical
+  there, which is why the stale state was invisible before.
+- **Neither permission can be verified with the ad-hoc signature `compile_and_run.sh` produces.**
+  `UNUserNotificationCenter.requestAuthorization` fails with `UNErrorDomain` code 1 ("Notifications are
+  not allowed for this application") - identical whether the app is launched via `open` (LaunchServices)
+  or as a raw binary, so it is the signature, not `LSUIElement` or the launch method. Empirically
+  CoreLocation also yields no fix for these builds, so the location dot, the alert radius and the
+  notification path all need a real Developer ID (`APP_IDENTITY` in `package_app.sh`) to test end to end.
 
 ## Maintaining this file
 
