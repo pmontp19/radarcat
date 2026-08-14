@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreLocation
 
 /// Contingut del popover: capçalera amb timestamp del frame actual, radar
 /// animat compositat, i controls de reproducció (play/pausa + cronològic).
@@ -73,6 +74,9 @@ struct MenuBarContentView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if let pos = locationMarkerPosition {
+                LocationMarker().position(pos)
+            }
         }
         // Alçada calculada explícitament a partir de l'amplada i de
         // l'aspecte real del frame compositat
@@ -84,6 +88,31 @@ struct MenuBarContentView: View {
         // acabava amb la mida intrínseca petita del contingut placeholder).
         // Calcular-ho a mà és més verbós però determinista.
         .frame(width: Self.stageWidth, height: Self.stageWidth / RadarCompositor.catalunyaCropAspectRatio)
+    }
+
+    /// Posició del punt "la meva ubicació" dins `radarStage`, en l'espai
+    /// local de la vista (origen dalt-esquerra, y avall, com SwiftUI).
+    /// `nil` si no hi ha ubicació coneguda o si cau fora del retall de
+    /// Catalunya - en aquest cas s'amaga el punt en lloc de clavar-lo a
+    /// una vora, ja que pot passar legítimament si l'usuari és fora de
+    /// Catalunya.
+    private var locationMarkerPosition: CGPoint? {
+        guard let coord = store.location.coordinate,
+              let px = GeoPosition.pixel(lat: coord.latitude, lon: coord.longitude)
+        else { return nil }
+        let crop = RadarCompositor.catalunyaCrop
+        let stageHeight = Self.stageWidth / RadarCompositor.catalunyaCropAspectRatio
+        // La imatge composada omple exactament (4,4)...(stageWidth-4,
+        // stageHeight-4) dins l'escenari (exact-fit, vegeu `radarStage`).
+        // `px`/`py` són en l'espai natiu del retall (origen baix-esquerra, y
+        // amunt) - cal invertir la y per l'espai de SwiftUI (dalt-esquerra,
+        // y avall).
+        let nx = px.x / crop.width
+        let ny = 1 - px.y / crop.height
+        return CGPoint(
+            x: 4 + nx * (Self.stageWidth - 8),
+            y: 4 + ny * (stageHeight - 8)
+        )
     }
 
     // MARK: - Controls
@@ -130,5 +159,16 @@ struct MenuBarContentView: View {
                 .buttonStyle(.borderless).font(.caption2)
         }
         .padding(8)
+    }
+}
+
+/// Punt "la meva ubicació" a l'estil Maps: cercle blau amb vora blanca.
+private struct LocationMarker: View {
+    var body: some View {
+        ZStack {
+            Circle().fill(.white).frame(width: 14, height: 14)
+                .shadow(color: .black.opacity(0.3), radius: 1)
+            Circle().fill(Color.blue).frame(width: 9, height: 9)
+        }
     }
 }
