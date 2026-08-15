@@ -5,9 +5,7 @@ import AppKit
 /// sense capçalera d'app, sense `Divider()` ni peu. Aquest fitxer és només
 /// composició; la implementació de cada peça viu al seu propi fitxer petit
 /// (`StatusHeaderView`, `MoreActionsMenu`, `RadarStageView`,
-/// `RadarStageStates`, `MapOverlays`, `LegendView`, `TimelineView`). Vegeu
-/// `popover-redesign-spec.md` i `popover-ui-spec.md` pel contracte i les
-/// mides exactes que segueixen totes elles.
+/// `RadarStageStates`, `MapOverlays`, `LegendView`, `TimelineView`).
 struct MenuBarContentView: View {
     @Environment(RadarStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
@@ -57,7 +55,7 @@ struct MenuBarContentView: View {
         }
     }
 
-    /// Dreceres ←/→ (secció 5 de l'spec): a diferència de l'espai
+    /// Dreceres ←/→: a diferència de l'espai
     /// (play/pausa), que viu al botó real de `TimelineView`, no hi ha cap
     /// control visible "frame següent/anterior" al popover (el scrub de la
     /// cronologia és per arrossegar, no per fletxes) - calen botons
