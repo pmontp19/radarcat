@@ -131,6 +131,38 @@ for this. The badge stays visible on purpose: it is the source attribution.
   CoreLocation also yields no fix for these builds, so the location dot, the alert radius and the
   notification path all need a real Developer ID (`APP_IDENTITY` in `package_app.sh`) to test end to end.
 
+## Meteocat avisos (comarca warnings) banner
+
+Implements `docs/plans/avisos-meteocat.md`: an opt-in toggle shows a banner when there is a
+vigent Meteocat danger warning for the user's comarca, ported from `ha-avisoscat`'s
+`models.py`/`parser.py`/`vigencia.py`/`comarques.py` (that sibling repo is the reference for
+*why* each tolerance rule exists; this project never imports or shells out to it).
+
+- **`Sources/RadarCat/Resources/comarques.json` is generated, not hand-edited.** Regenerate
+  with `python3 Scripts/generate_comarques_geometry.py <path-to-comarquesAmbMar.json>`, fetching
+  the input from `https://static-m.meteo.cat/assets-w3/json/topojson/comarquesAmbMar.json` (same
+  file `ha-avisoscat`'s config flow downloads). The script self-verifies two known points
+  (Barcelona → Barcelonès, Vic → Osona) before writing the output and aborts if either fails.
+  Only needed again if Meteocat touches comarca administrative boundaries - rare.
+- **v1 is deliberately narrower than `ha-avisoscat`'s own vigencia logic**: only ordinary
+  `avis`/`vigilancia` warnings with per-band affectations project as "vigent right now"
+  (`MeteocatAvisosVigencia.avisVigent`) - no `temps_violent` (its own two-hour-from-emission
+  window), no `preavis` (a different top-level payload key `MeteocatAvisosParser` never reads),
+  no announced/outlook horizons, and no derived day for an evolution whose own `dia` field is
+  unparseable (that inference in `vigencia.py` exists to serve a 3-day outlook grid this v1 does
+  not build). Widening any of these is a deliberate scope change, not a bug fix.
+- **This environment has no Swift toolchain**, so this feature's Swift code was written and
+  cross-checked by transliterating the exact byte-walking/ray-casting algorithms to Python and
+  running them against real captured fixtures (`ha-avisoscat`'s own test fixtures - same public
+  source, both projects read it) before trusting the Swift port. `swift build`/`swift test` were
+  never actually run against it - do that before relying on this feature further.
+- Like the rain alerts, GPS/comarca resolution needs a real location fix, which this project's
+  ad-hoc-signed `compile_and_run.sh` builds cannot obtain (see the CoreLocation/notifications
+  note above) - only the pure logic (`ComarcaResolver`, `MeteocatAvisos`, `MeteocatAvisosParser`,
+  `MeteocatAvisosVigencia`, `RadarStore.locationShouldBeActive`) is verifiable without a Developer
+  ID build. To eyeball the banner's design/position without a real fix, temporarily force
+  `RadarStore.currentMeteocatWarning` to a sample value (never commit that change).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

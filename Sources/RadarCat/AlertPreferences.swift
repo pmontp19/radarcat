@@ -29,6 +29,11 @@ final class AlertPreferences {
     /// recalcular a l'instant amb el frame que ja té.
     var onRadiusChange: ((Double) -> Void)?
 
+    /// Cridada quan `meteocatAlertsEnabled` canvia de valor - mateix patró
+    /// exacte que `onEnabledChange`, per al banner d'avisos oficials de
+    /// Meteocat (independent dels avisos de pluja per color de píxel).
+    var onMeteocatEnabledChange: ((Bool) -> Void)?
+
     var alertsEnabled: Bool {
         didSet {
             guard oldValue != alertsEnabled else { return }
@@ -45,9 +50,22 @@ final class AlertPreferences {
         }
     }
 
+    /// Opt-in independent dels avisos de pluja: banner condicional al
+    /// popover amb els avisos oficials de perill del Meteocat (calor, vent,
+    /// pluja, neu...) per a la comarca de l'usuari - vegeu
+    /// `docs/plans/avisos-meteocat.md`.
+    var meteocatAlertsEnabled: Bool {
+        didSet {
+            guard oldValue != meteocatAlertsEnabled else { return }
+            UserDefaults.standard.set(meteocatAlertsEnabled, forKey: Keys.meteocatAlertsEnabled)
+            onMeteocatEnabledChange?(meteocatAlertsEnabled)
+        }
+    }
+
     private enum Keys {
         static let alertsEnabled = "com.pere.radarcat.alertsEnabled"
         static let radiusKm = "com.pere.radarcat.alertsRadiusKm"
+        static let meteocatAlertsEnabled = "com.pere.radarcat.meteocatAlertsEnabled"
     }
 
     private init() {
@@ -59,5 +77,6 @@ final class AlertPreferences {
         // radi que el `Picker` no podria seleccionar.
         let storedRadius = defaults.object(forKey: Keys.radiusKm) as? Double ?? 20
         radiusKm = Self.radiusOptions.contains(storedRadius) ? storedRadius : 20
+        meteocatAlertsEnabled = defaults.object(forKey: Keys.meteocatAlertsEnabled) as? Bool ?? false
     }
 }

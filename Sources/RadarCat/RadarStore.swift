@@ -53,6 +53,20 @@ final class RadarStore {
     /// cas, no cal que aquí es distingeixi el motiu.
     private(set) var placeName: String?
 
+    /// Avís oficial de Meteocat més sever vigent ara mateix a la comarca de
+    /// l'usuari, o `nil` si `meteocatAlertsEnabled` és fals, encara no hi ha
+    /// coordenada/comarca resolta, no hi ha cap avís vigent, o l'última
+    /// consulta ha fallat (fallback graciós sempre - vegeu
+    /// `docs/plans/avisos-meteocat.md`, mai toca `errorMessage`, exclusiu
+    /// del radar). Recalculat des de `enqueueMeteocatAlertUpdate`.
+    private(set) var currentMeteocatWarning: MeteocatCurrentWarning?
+    /// Comarca resolta de la coordenada actual, `nil` en les mateixes
+    /// condicions que `currentMeteocatWarning` (excepte que una resolució de
+    /// comarca correcta però sense avís vigent el deixa amb valor). Exposat
+    /// perquè la vista de detall pugui mostrar el nom de la comarca sense
+    /// que `MeteocatCurrentWarning` l'hagi de dur ell mateix.
+    private(set) var userComarcaId: Int?
+
     /// Aparença amb què s'han compost els frames vigents. Es llegeix del
     /// sistema ja a l'`init` (vegeu `currentSystemAppearance`) en lloc de
     /// començar sempre en `.light`: `setAppearance` és qui la canvia després,
@@ -107,6 +121,9 @@ final class RadarStore {
     /// Cua d'una posició per a `updateRainState` - mateix patró, vegeu
     /// `enqueueRainStateUpdate`.
     private var pendingRainState: Task<Void, Never>?
+    /// Cua d'una posició per a `updateMeteocatState` - mateix patró, vegeu
+    /// `enqueueMeteocatAlertUpdate`.
+    private var pendingMeteocatUpdate: Task<Void, Never>?
 
     /// Geocodificació inversa del municipi - vegeu `updatePlaceNameIfNeeded`.
     private let geocoder = CLGeocoder()
@@ -155,6 +172,19 @@ final class RadarStore {
                 }
             }
         }
+        // Mateix patró que `onEnabledChange`, per al toggle independent dels
+        // avisos de Meteocat (docs/plans/avisos-meteocat.md). `[weak self]`
+        // pel mateix motiu.
+        AlertPreferences.shared.onMeteocatEnabledChange = { [weak self] enabled in
+            Task { @MainActor in
+                guard let self else { return }
+                if enabled {
+                    await self.enableMeteocatAlerts()
+                } else {
+                    self.disableMeteocatAlerts()
+                }
+            }
+        }
         // El primer fix de GPS no arriba mai de manera síncrona (vegeu
         // `LocationProvider.onCoordinateChange`): sense aquest enganxall,
         // `enableAlerts()` es quedaria cridant `updateRainState`/
@@ -169,6 +199,7 @@ final class RadarStore {
                 guard let self else { return }
                 self.updatePlaceNameIfNeeded()
                 await self.enqueueRainStateUpdate()
+                await self.enqueueMeteocatAlertUpdate()
             }
         }
         // Canviar el radi als Ajustos ha de recalcular la severitat a
@@ -189,7 +220,14 @@ final class RadarStore {
         // notificacions aquí: `UNUserNotificationCenter` recorda la decisió
         // de l'usuari entre llançaments, així que repetir-la no mostraria
         // cap diàleg nou i només seria una crida buida.
-        if AlertPreferences.shared.alertsEnabled {
+        // Igual que abans, però comprovant els DOS toggles (vegeu
+        // `locationShouldBeActive`): si només els avisos de Meteocat estaven
+        // actius d'una sessió anterior, la ubicació també ha de reengegar-se
+        // en arrencar, encara que els avisos de pluja segueixin desactivats.
+        if Self.locationShouldBeActive(
+            rainAlertsEnabled: AlertPreferences.shared.alertsEnabled,
+            meteocatAlertsEnabled: AlertPreferences.shared.meteocatAlertsEnabled
+        ) {
             location.requestPermissionAndStart()
         }
 
@@ -252,6 +290,10 @@ final class RadarStore {
         // l'antic `checkRain()`.
         await enqueueRainStateUpdate()
         updatePlaceNameIfNeeded()
+        // Mateixa cadència que la pluja, sense timer nou (docs/plans/
+        // avisos-meteocat.md): un error de xarxa/parsing aquí es tracta amb
+        // el mateix fallback graciós, mai toca `errorMessage`.
+        await enqueueMeteocatAlertUpdate()
     }
 
     /// La vista la crida amb `.onChange(of: colorScheme)` (i un cop en
@@ -279,25 +321,69 @@ final class RadarStore {
     /// `location.onCoordinateChange` (vegeu l'`init`) en quant CoreLocation
     /// entregui el primer fix.
     func enableAlerts() async {
-        location.requestPermissionAndStart()
+        updateLocationLifecycle()
         RainNotifier.requestAuthorization()
         rainAlert = RainAlertTracker()
         await enqueueRainStateUpdate()
         updatePlaceNameIfNeeded()
     }
 
-    /// Contrari d'activar: para la ubicació, cancel·la qualsevol
-    /// geocodificació en vol (sense això s'esperaria una resposta de xarxa
-    /// que ja no es farà servir) i buida tot el que en depenia perquè la
-    /// vista deixi de mostrar dades d'ubicació a l'instant, sense esperar el
-    /// pròxim cicle de refresc.
+    /// Contrari d'activar: para la ubicació NOMÉS si els avisos de Meteocat
+    /// tampoc l'estan fent servir (vegeu `updateLocationLifecycle`),
+    /// cancel·la qualsevol geocodificació en vol (sense això s'esperaria una
+    /// resposta de xarxa que ja no es farà servir) i buida tot el que en
+    /// depenia perquè la vista deixi de mostrar dades d'ubicació a l'instant,
+    /// sense esperar el pròxim cicle de refresc.
     func disableAlerts() {
-        location.stop()
+        updateLocationLifecycle()
         geocoder.cancelGeocode()
         rainAlert = RainAlertTracker()
         severityHere = .none
         placeName = nil
         lastGeocodedLocation = nil
+    }
+
+    /// Activa el banner d'avisos de Meteocat: assegura que la ubicació
+    /// estigui activa (compartida amb els avisos de pluja, vegeu
+    /// `updateLocationLifecycle`) i força un primer càlcul amb el que ja hi
+    /// hagi - com `enableAlerts()`, la coordenada real pot no haver arribat
+    /// encara (`CLLocationManager` mai la dona de manera síncrona), el
+    /// recàlcul de veritat arriba via `location.onCoordinateChange`.
+    func enableMeteocatAlerts() async {
+        updateLocationLifecycle()
+        await enqueueMeteocatAlertUpdate()
+    }
+
+    /// Contrari d'activar: para la ubicació NOMÉS si els avisos de pluja
+    /// tampoc l'estan fent servir, i buida l'estat a l'instant en lloc
+    /// d'esperar el pròxim cicle de refresc.
+    func disableMeteocatAlerts() {
+        updateLocationLifecycle()
+        currentMeteocatWarning = nil
+        userComarcaId = nil
+    }
+
+    /// Cicle de vida compartit de la ubicació entre els avisos de pluja i els
+    /// de Meteocat (docs/plans/avisos-meteocat.md, decisió 2):
+    /// `location.stop()` només es crida quan CAP dels dos toggles està
+    /// actiu - activar Meteocat i després desactivar la pluja (o al revés)
+    /// no ha de tallar la ubicació sota els peus de l'altra funcionalitat.
+    private func updateLocationLifecycle() {
+        if Self.locationShouldBeActive(
+            rainAlertsEnabled: AlertPreferences.shared.alertsEnabled,
+            meteocatAlertsEnabled: AlertPreferences.shared.meteocatAlertsEnabled
+        ) {
+            location.requestPermissionAndStart()
+        } else {
+            location.stop()
+        }
+    }
+
+    /// Funció pura (testejable sense `CLLocationManager` ni `@MainActor`,
+    /// per això `nonisolated`): la ubicació ha d'estar activa si QUALSEVOL
+    /// dels dos toggles ho està.
+    nonisolated static func locationShouldBeActive(rainAlertsEnabled: Bool, meteocatAlertsEnabled: Bool) -> Bool {
+        rainAlertsEnabled || meteocatAlertsEnabled
     }
 
     /// Encadena crides a `RadarAnimator.build`: `refresh()` (timestamp nou) i
@@ -380,6 +466,44 @@ final class RadarStore {
         if rainAlert.update(severity: severity) {
             RainNotifier.notifyRainStarted()
         }
+    }
+
+    /// Mateix patró que `enqueueRainStateUpdate`, aplicat a
+    /// `updateMeteocatState`: `refresh()`, `location.onCoordinateChange`, i
+    /// `enableMeteocatAlerts()` hi passen tots tres, serialitzats perquè una
+    /// consulta que resol de seguida no pugui acabar abans que una altra més
+    /// antiga encara esperant xarxa.
+    private func enqueueMeteocatAlertUpdate() async {
+        let previous = pendingMeteocatUpdate
+        let task = Task {
+            await previous?.value
+            await self.updateMeteocatState()
+        }
+        pendingMeteocatUpdate = task
+        await task.value
+    }
+
+    /// Resol la comarca de la coordenada actual i, si n'hi ha, l'avís
+    /// vigent - o buida totes dues coses si els avisos de Meteocat estan
+    /// desactivats, encara no hi ha coordenada, o la coordenada cau fora de
+    /// Catalunya. Qualsevol error de xarxa/parsing de
+    /// `MeteocatAlertsFetcher` ja arriba aquí com a `nil` (fallback graciós
+    /// sempre, mai toca `errorMessage`) - es manté l'últim avís bo conegut
+    /// NOMÉS mentre la comarca resolta sigui la mateixa; si la comarca ha
+    /// canviat, un avís de la comarca antiga no té sentit per a la nova.
+    private func updateMeteocatState() async {
+        guard AlertPreferences.shared.meteocatAlertsEnabled,
+              let coord = location.coordinate,
+              let comarca = ComarcaResolver.comarca(at: coord.latitude, lon: coord.longitude)
+        else {
+            currentMeteocatWarning = nil
+            userComarcaId = nil
+            return
+        }
+        userComarcaId = comarca.idComarca
+        currentMeteocatWarning = await MeteocatAlertsFetcher.currentWarning(
+            session: session, idComarca: comarca.idComarca, now: Date()
+        )
     }
 
     /// Geocodificació inversa del municipi de l'usuari - cachejada per

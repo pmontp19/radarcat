@@ -118,3 +118,61 @@ struct AttributionLabel: View {
             .shadow(color: .black.opacity(0.5), radius: 1)
     }
 }
+
+/// Banner condicional de l'avís oficial de Meteocat més sever vigent a la
+/// comarca de l'usuari - dalt-esquerra de la targeta perquè no col·lideixi
+/// amb `StalePillView` (dalt-dreta) quan totes dues condicions coincideixen
+/// (docs/plans/avisos-meteocat.md). En clicar-lo obre
+/// `MeteocatAlertDetailView` en popover. Sense insígnia "BETA": a diferència
+/// dels avisos de pluja (heurística de color de píxel), aquestes són dades
+/// oficials directes.
+struct MeteocatWarningBannerView: View {
+    let warning: MeteocatCurrentWarning
+    /// Nom de la comarca resolta (`RadarStore.userComarcaId`), passat des de
+    /// fora perquè aquesta vista no hagi de conèixer `ComarcaResolver`.
+    let comarcaNom: String?
+
+    @State private var showingDetail = false
+
+    var body: some View {
+        Button {
+            showingDetail = true
+        } label: {
+            HStack(spacing: 4) {
+                Circle().fill(warning.category.color).frame(width: 7, height: 7)
+                Text(warning.meteorNom)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.thinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(warning.category.color.opacity(0.5), lineWidth: 0.75))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Avís de Meteocat: \(warning.meteorNom)")
+        .accessibilityHint("Activa per veure els detalls de l'avís")
+        .popover(isPresented: $showingDetail) {
+            MeteocatAlertDetailView(warning: warning, comarcaNom: comarcaNom)
+        }
+    }
+}
+
+extension MeteocatDangerCategory {
+    /// Colors oficials de Meteocat pel grau de perill 0-6
+    /// (docs/plans/avisos-meteocat.md): verd `#B4C828`, groc `#FFF200`,
+    /// taronja `#E99B15`, vermell `#CF0920`. Colors literals a propòsit,
+    /// tercera excepció explícita a "sense colors literals per a
+    /// superfícies" d'aquest projecte (les altres dues: el blau de Maps de
+    /// dalt i la llegenda pròpia de `LegendView`) - són el codi de colors
+    /// oficial de Meteocat, no un color de superfície de la interfície.
+    var color: Color {
+        switch self {
+        case .cap: return Color(red: 0.706, green: 0.784, blue: 0.157)
+        case .moderat: return Color(red: 1.0, green: 0.949, blue: 0)
+        case .alt: return Color(red: 0.914, green: 0.608, blue: 0.082)
+        case .moltAlt: return Color(red: 0.812, green: 0.035, blue: 0.125)
+        }
+    }
+}

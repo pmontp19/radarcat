@@ -95,7 +95,21 @@ struct RadarStageView: View {
                     .padding(7)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
+            if let warning = store.currentMeteocatWarning {
+                // Dalt-esquerra, no dalt-dreta com `StalePillView`, perquè no
+                // hi col·lideixi quan totes dues condicions coincideixen.
+                MeteocatWarningBannerView(warning: warning, comarcaNom: meteocatComarcaNom)
+                    .padding(7)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         }
+    }
+
+    /// Nom de la comarca resolta per a l'avís de Meteocat vigent, `nil` en
+    /// les mateixes condicions que `store.currentMeteocatWarning` és `nil`.
+    private var meteocatComarcaNom: String? {
+        guard let id = store.userComarcaId else { return nil }
+        return ComarcaResolver.comarques.first { $0.idComarca == id }?.nom
     }
 
     /// Llegenda i, si cal, atribució pròpia, apilades verticalment (la

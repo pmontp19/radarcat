@@ -52,6 +52,14 @@ struct MoreActionsMenu: View {
 
             Divider()
 
+            // Sense "BETA" (a diferència dels avisos de pluja): dades
+            // oficials directes de Meteocat.
+            Toggle(isOn: $prefs.meteocatAlertsEnabled) {
+                Text("Avisos de Meteocat")
+            }
+
+            Divider()
+
             Link("Obre meteo.cat", destination: RadarAPI.meteoCatURL)
             SettingsLink { Text("Ajustos…") }
                 .keyboardShortcut(",", modifiers: .command)

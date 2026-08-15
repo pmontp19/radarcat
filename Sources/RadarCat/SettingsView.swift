@@ -45,6 +45,32 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+
+            Section {
+                // Sense `BetaBadge`, a diferència dels avisos de pluja: són
+                // dades oficials directes de Meteocat, no una heurística de
+                // color de píxel encara no validada àmpliament.
+                Toggle("Avisos de Meteocat", isOn: $prefs.meteocatAlertsEnabled)
+
+                if prefs.meteocatAlertsEnabled && store.location.authorizationDenied {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("L'accés a la ubicació està denegat: els avisos no poden saber a quina comarca ets.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Obre Configuració del Sistema…") {
+                            openLocationPrivacySettings()
+                        }
+                    }
+                }
+            } footer: {
+                Text(
+                    "Mostra un avís quan hi hagi un avís oficial de perill vigent a la teva " +
+                    "comarca (calor, vent, pluja, neu...). Necessita accés a la ubicació per " +
+                    "situar la comarca - macOS el demanarà en activar aquesta opció."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(20)
