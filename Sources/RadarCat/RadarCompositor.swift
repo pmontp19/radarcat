@@ -410,7 +410,7 @@ actor RadarCompositor {
             } catch {
                 if attempt == 1 { return nil }
             }
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(for: .milliseconds(150))
         }
         return nil
     }
