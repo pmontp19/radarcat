@@ -295,6 +295,29 @@ actor RadarCompositor {
         return out
     }
 
+    /// Classifica la severitat de pluja d'un frame (compositat aquí mateix,
+    /// típicament ja servit del cache) SENSE sortir de l'actor: el mostreig
+    /// de píxels + fins a 4 flood-fills de `RainDetector.maxSeverityOverFrame`
+    /// és feina de CPU (uns quants ms) que abans corria dins `RadarStore`
+    /// (`@MainActor`) - movent-la aquí, `RadarStore` només espera els
+    /// `RainSeverity` resultants (enums, trivialment `Sendable`) en lloc de
+    /// fer-se enviar el `CGImage` i classificar-lo ell mateix al main actor.
+    /// `normalized` és `nil` quan no cal calcular la severitat al voltant
+    /// d'un punt (avisos desactivats, sense coordenada, o fora del retall) -
+    /// en aquest cas `here` surt `.none` sense ni cridar `maxSeverity`. `nil`
+    /// si no hi ha frame compositat (mateix contracte que `compositeFrame`).
+    func classifyRain(
+        timestamp: Date,
+        appearance: FrameAppearance,
+        aroundNormalized normalized: CGPoint?,
+        radiusKm: Double
+    ) async -> (overFrame: RainSeverity, here: RainSeverity)? {
+        guard let cg = await compositeFrame(timestamp: timestamp, appearance: appearance) else { return nil }
+        let overFrame = RainDetector.maxSeverityOverFrame(in: cg)
+        let here = normalized.map { RainDetector.maxSeverity(in: cg, aroundNormalized: $0, radiusKm: radiusKm) } ?? .none
+        return (overFrame, here)
+    }
+
     /// `CIContext` és car de crear; un de sol reutilitzat entre frames n'hi
     /// ha prou (no té estat mutable propi de cara a nosaltres).
     private static let ciContext = CIContext()
