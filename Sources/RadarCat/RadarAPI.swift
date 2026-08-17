@@ -34,10 +34,9 @@ enum RadarAPI {
 }
 
 extension Date {
-    /// Cachejat: `tilePathComponents` és la base de `RadarCompositor.cacheKey`,
-    /// cridada a CADA `compositeFrame` (encara que sigui un cache hit) i un
-    /// cop per tile de radar durant un `build` (fins a 360 crides per
-    /// rebuild) - recrear el `DateFormatter` a cada crida hi era un cost pur.
+    /// Cachejat: cridada a cada `compositeFrame` (fins i tot en cache hits) i
+    /// un cop per tile de radar durant un `build` - recrear el `DateFormatter`
+    /// cada cop hi era un cost pur.
     private static let tilePathFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

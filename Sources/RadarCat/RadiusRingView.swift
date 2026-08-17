@@ -1,9 +1,7 @@
 import SwiftUI
 
 /// Anell del radi d'avís al voltant del punt d'ubicació, amb l'etiqueta de
-/// distància a sota. Extret de `LocationOverlay` perquè és un bloc no
-/// trivial (anell + posicionament de l'etiqueta), no un simple ajudant que
-/// hi encaixi inline.
+/// distància a sota.
 struct RadiusRingView: View {
     let radiusKm: Double
     let x: CGFloat

@@ -1,11 +1,8 @@
 import SwiftUI
 
 /// Overlays flotants sobre el frame compositat: llegenda, atribució
-/// condicional, punt d'ubicació, i el tractament d'"obsolet" (atenuació +
-/// píndola). Extret de `RadarStageView` perquè és una decisió multi-branca
-/// amb paràmetres propis, no un simple ajudant que hi encaixi inline. Només
-/// té sentit dibuixar-los si ja hi ha mapa a sota: als estats de primera
-/// càrrega/error sense frame no es dibuixa cap.
+/// condicional, punt d'ubicació, tractament d'"obsolet". Només es dibuixen
+/// si ja hi ha mapa a sota.
 struct RadarStageOverlaysView: View {
     @Environment(RadarStore.self) private var store
     let cardSize: CGSize

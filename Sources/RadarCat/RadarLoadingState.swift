@@ -29,10 +29,8 @@ struct RadarLoadingState: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Sense `GeometryReader`: un `Rectangle` sense mida pròpia ja omple
-    /// l'ample disponible, així que `.scaleEffect(x:anchor:.leading)` sobre
-    /// el rectangle d'accent basta per retallar-lo a la fracció `progress`
-    /// sense necessitat de llegir cap `geo.size.width`.
+    /// Sense `GeometryReader`: el `Rectangle` ja omple l'ample disponible,
+    /// `.scaleEffect(x:anchor:.leading)` basta per retallar-lo a `progress`.
     private var progressBar: some View {
         ZStack(alignment: .leading) {
             Rectangle().fill(Color.primary.opacity(0.08))

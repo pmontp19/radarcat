@@ -2,8 +2,6 @@ import SwiftUI
 
 /// Contingut principal de la targeta del mapa: el frame compositat, o
 /// l'estat que toqui mentre no n'hi ha cap (primera càrrega o error).
-/// Extret de `RadarStageView` perquè és una decisió multi-branca amb
-/// paràmetres propis, no un simple ajudant que hi encaixi inline.
 struct RadarStageContentView: View {
     let animator: RadarAnimator
     /// Ja humanitzat en català (`store.errorMessage`): mai

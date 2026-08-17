@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Botó de play/pausa de la cronologia. Extret de `TimelineView` perquè és
-/// un control amb la seva pròpia lògica de modificadors/accessibilitat, no
-/// un simple ajudant que hi encaixi inline.
+/// Botó de play/pausa de la cronologia.
 struct PlayPauseButton: View {
     let animator: RadarAnimator
 

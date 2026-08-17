@@ -1,23 +1,12 @@
 import SwiftUI
 
-/// Hora del frame en reproducció, amb un desplaçament relatiu opcional a
-/// sota. Extret de `TimelineView` perquè és un bloc amb la seva pròpia
-/// lògica de layout, no un simple ajudant que hi encaixi inline.
+/// Hora del frame en reproducció (mai "darrera imatge", que és cosa de
+/// `StatusHeaderView`), amb un desplaçament relatiu ("−N min") a sota, buit
+/// al frame més nou ("Ara" ja hi surt a la pista de sota).
 ///
-/// L'ÚNICA hora que reflecteix el frame en reproducció (mai etiquetada com a
-/// "darrera imatge", que és cosa de `StatusHeaderView`). Al frame més nou
-/// NOMÉS es mostra l'hora, sense segona línia: "Ara" ja hi surt a la pista
-/// de sota (`TimelineTrackView`) - repetir-lo aquí llegia com un duplicat
-/// ("11:18 / Ara" al costat d'"Ara"). El desplaçament relatiu ("−N min")
-/// només aporta res quan NO s'és al frame més nou.
-///
-/// La segona línia SEMPRE ocupa el mateix espai, buida o no (text " " amb
-/// opacitat 0 en lloc de fer desaparèixer la línia sencera): abans, quan
-/// `relative` passava de buit a no-buit en arrossegar, aquest bloc canviava
-/// d'1 a 2 línies d'alçada i, com que vivia en una `HStack` amb el botó de
-/// play (alineació `.center` per defecte), tot plegat - botó inclòs -
-/// saltava amunt/avall a cada canvi. Reservar l'alçada sempre elimina el
-/// salt sense necessitat de fixar cap alineació explícita.
+/// La segona línia SEMPRE ocupa el mateix espai (text " " amb opacitat 0 en
+/// lloc de fer-la desaparèixer): si no, l'`HStack` amb el botó de play
+/// saltava d'alçada a cada canvi.
 struct FrameTimestampLabel: View {
     let animator: RadarAnimator
 
