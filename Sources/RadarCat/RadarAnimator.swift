@@ -235,8 +235,10 @@ final class RadarAnimator {
         let interval = frames.indices.contains(currentIndex) && currentIndex == frames.count - 1
             ? holdInterval
             : stepInterval
+        // El timer viu a `RunLoop.main`: ja corre al main thread, per això
+        // `assumeIsolated` i no un `Task` nou a cada tick.
         let t = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.fireAdvance() }
+            MainActor.assumeIsolated { self?.fireAdvance() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

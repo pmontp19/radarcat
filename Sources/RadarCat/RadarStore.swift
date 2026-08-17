@@ -456,44 +456,46 @@ final class RadarStore {
     }
 
     /// Recalcula `catalunyaSeverity` (sempre) i `severityHere`/l'alarma de
-    /// l'usuari (només amb avisos actius) sobre el frame més recent. Es
-    /// demana amb el mateix timestamp+aparença que `enqueueRebuild` acaba de
-    /// compondre, així que `RadarCompositor` el serveix de la seva cache en
-    /// lloc de tornar a descarregar res. NOMÉS es crida via
-    /// `enqueueRainStateUpdate` (vegeu), mai directament.
+    /// l'usuari (només amb avisos actius) sobre el frame més recent. La
+    /// classificació (`RainDetector`) corre dins `RadarCompositor.classifyRain`,
+    /// fora del main actor - aquí només se n'espera el resultat. NOMÉS es
+    /// crida via `enqueueRainStateUpdate`, mai directament.
     private func updateRainState() async {
-        guard let latest = latestTimestamp,
-              let cg = await RadarCompositor.shared.compositeFrame(timestamp: latest, appearance: appearance)
-        else {
-            // Sense frame compositat NO SABEM si plou o no: `catalunyaSeverity`
-            // es queda a `nil` (mai s'ha de llegir com "sense pluja" per manca
-            // de dades) i `rainAlert` NO es toca - tractar un error de xarxa/
-            // compositat com un cicle sec confirmat podria netejar l'alarma de
-            // l'usuari sense cap prova real que hagi deixat de ploure.
+        guard let latest = latestTimestamp else {
+            // Sense frame NO SABEM si plou: `catalunyaSeverity` es queda a
+            // `nil` (mai "sense pluja" per manca de dades) i `rainAlert` no
+            // es toca.
             catalunyaSeverity = nil
             if AlertPreferences.shared.alertsEnabled {
                 severityHere = .none
             }
             return
         }
-        catalunyaSeverity = RainDetector.maxSeverityOverFrame(in: cg)
+
+        // `nil` sense avisos actius, sense coordenada, o fora del retall -
+        // `classifyRain` no calcula `here` en cap d'aquests casos.
+        let normalized: CGPoint? = AlertPreferences.shared.alertsEnabled
+            ? location.coordinate.flatMap { RadarFrameGeometry.normalized(lat: $0.latitude, lon: $0.longitude) }
+            : nil
+
+        guard let result = await RadarCompositor.shared.classifyRain(
+            timestamp: latest, appearance: appearance,
+            aroundNormalized: normalized, radiusKm: AlertPreferences.shared.radiusKm
+        ) else {
+            catalunyaSeverity = nil
+            if AlertPreferences.shared.alertsEnabled {
+                severityHere = .none
+            }
+            return
+        }
+        catalunyaSeverity = result.overFrame
 
         // Sense avisos actius `severityHere` es queda tal com l'ha deixat
         // `disableAlerts()` (.none): no té sentit ni ubicació a mirar.
         guard AlertPreferences.shared.alertsEnabled else { return }
 
-        let severity: RainSeverity
-        if let coord = location.coordinate,
-           let normalized = RadarFrameGeometry.normalized(lat: coord.latitude, lon: coord.longitude) {
-            severity = RainDetector.maxSeverity(in: cg, aroundNormalized: normalized, radiusKm: AlertPreferences.shared.radiusKm)
-        } else {
-            // Encara sense posició (o l'usuari cau fora del retall): es
-            // tracta com "sense eco", subjecte a la mateixa histèresi que un
-            // aclariment real - vegeu el raonament a `RainAlertTracker`.
-            severity = .none
-        }
-        severityHere = severity
-        if rainAlert.update(severity: severity) {
+        severityHere = result.here
+        if rainAlert.update(severity: result.here) {
             RainNotifier.notifyRainStarted()
         }
     }

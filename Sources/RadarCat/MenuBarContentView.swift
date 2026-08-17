@@ -94,10 +94,16 @@ struct MenuBarContentView: View {
 /// prou de sola. Format fix "H:mm" (24h, sense AM/PM): ca_ES ja fa servir
 /// aquest format i tota la interfície és en català.
 extension Date {
-    var hourMinuteLabel: String {
+    /// Cachejat: es llegeix a cada tick d'animació i durant el scrub del
+    /// timeline; recrear el `DateFormatter` cada cop hi era pur malbaratament.
+    private static let hourMinuteFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "H:mm"
-        return f.string(from: self)
+        return f
+    }()
+
+    var hourMinuteLabel: String {
+        Self.hourMinuteFormatter.string(from: self)
     }
 }

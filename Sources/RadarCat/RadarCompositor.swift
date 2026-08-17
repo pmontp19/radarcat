@@ -295,6 +295,23 @@ actor RadarCompositor {
         return out
     }
 
+    /// Classifica la pluja SENSE sortir de l'actor: el mostreig de píxels de
+    /// `RainDetector` és feina de CPU que abans corria a `RadarStore`
+    /// (`@MainActor`). `normalized` `nil` -> `here` surt `.none` sense
+    /// cridar `maxSeverity`. `nil` si no hi ha frame (mateix contracte que
+    /// `compositeFrame`).
+    func classifyRain(
+        timestamp: Date,
+        appearance: FrameAppearance,
+        aroundNormalized normalized: CGPoint?,
+        radiusKm: Double
+    ) async -> (overFrame: RainSeverity, here: RainSeverity)? {
+        guard let cg = await compositeFrame(timestamp: timestamp, appearance: appearance) else { return nil }
+        let overFrame = RainDetector.maxSeverityOverFrame(in: cg)
+        let here = normalized.map { RainDetector.maxSeverity(in: cg, aroundNormalized: $0, radiusKm: radiusKm) } ?? .none
+        return (overFrame, here)
+    }
+
     /// `CIContext` és car de crear; un de sol reutilitzat entre frames n'hi
     /// ha prou (no té estat mutable propi de cara a nosaltres).
     private static let ciContext = CIContext()
@@ -410,7 +427,7 @@ actor RadarCompositor {
             } catch {
                 if attempt == 1 { return nil }
             }
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            try? await Task.sleep(for: .milliseconds(150))
         }
         return nil
     }

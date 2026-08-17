@@ -34,22 +34,33 @@ enum RadarAPI {
 }
 
 extension Date {
-    /// Components pel path de tiles en hora UTC: "yyyy/MM/dd/HH/mm".
-    var tilePathComponents: String {
+    /// Cachejat: cridada a cada `compositeFrame` (fins i tot en cache hits) i
+    /// un cop per tile de radar durant un `build` - recrear el `DateFormatter`
+    /// cada cop hi era un cost pur.
+    private static let tilePathFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyy/MM/dd/HH/mm"
-        return f.string(from: self)
+        return f
+    }()
+
+    /// Components pel path de tiles en hora UTC: "yyyy/MM/dd/HH/mm".
+    var tilePathComponents: String {
+        Self.tilePathFormatter.string(from: self)
     }
 
-    /// Etiqueta llegible (hora local): "06/08 16:54".
-    var shortLabel: String {
+    private static let shortLabelFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale.current
         f.dateStyle = .short
         f.timeStyle = .short
-        return f.string(from: self)
+        return f
+    }()
+
+    /// Etiqueta llegible (hora local): "06/08 16:54".
+    var shortLabel: String {
+        Self.shortLabelFormatter.string(from: self)
     }
 }
 
@@ -60,12 +71,16 @@ struct RadarMeta: Decodable {
     var ultimaImatgeDate: Date? { RadarMeta.parse(dataUltimaImatge) }
     var sistemaDate: Date? { RadarMeta.parse(dataSistema) }
 
-    /// "08/06/2026 14:54Z" -> Date en UTC.
-    static func parse(_ raw: String) -> Date? {
+    private static let parseFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "MM/dd/yyyy HH:mm'Z'"
-        return f.date(from: raw)
+        return f
+    }()
+
+    /// "08/06/2026 14:54Z" -> Date en UTC.
+    static func parse(_ raw: String) -> Date? {
+        parseFormatter.date(from: raw)
     }
 }
