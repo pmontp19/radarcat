@@ -6,7 +6,7 @@ import AppKit
 /// - vegeu el comentari a `RadarCatApp` sobre per què el `SettingsLink`
 /// d'aquí és l'únic camí real cap a aquella finestra en una app
 /// `LSUIElement`). També substitueix el botó de refresc manual solt de la
-/// capçalera antiga. Vegeu `popover-ui-spec.md` secció 1.
+/// capçalera antiga.
 struct MoreActionsMenu: View {
     @Environment(RadarStore.self) private var store
     /// `@Bindable` sobre el singleton (com ja fa `SettingsView`): permet un

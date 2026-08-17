@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// Aparença compartida dels botons quadrats d'icona del popover: el "⋯" de
-/// `MoreActionsMenu` i el play/pausa de `TimelineView` són, segons l'spec,
-/// el mateix element visual (22x22pt, cantonada 5pt, farciment que es marca
-/// una mica en hover) - abans hi havia dues còpies literals d'aquestes
-/// mides, un lloc únic evita que es desincronitzin si es retoquen.
+/// `MoreActionsMenu` i el play/pausa de `TimelineView` són el mateix element
+/// visual (22x22pt, cantonada 5pt, farciment que es marca una mica en hover)
+/// - abans hi havia dues còpies literals d'aquestes mides, un lloc únic
+/// evita que es desincronitzin si es retoquen.
 private struct IconButtonChrome: ViewModifier {
     @State private var isHovering = false
 

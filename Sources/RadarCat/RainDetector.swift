@@ -89,58 +89,20 @@ enum RainDetector {
     /// Severitat màxima present a TOT el frame, ignorant la insígnia i el
     /// soroll aïllat. `.none` només si de debò no hi ha eco significatiu.
     ///
-    /// Mateix mostreig que abans feia servir `hasSignificantRain` (pas de 4
-    /// píxels - als ecos de radar, escala molt més gran que 4px, no se'ls
-    /// escapa cap taca real, i és prou barat per cridar-se cada cicle de
-    /// refresc). El llindar de mostres és el mateix d'abans (proporcional a
-    /// les mostres VÀLIDES, sense comptar les descartades per
-    /// `attributionRectNormalized`, amb un mínim absolut de 6 perquè en
-    /// frames petits una fracció microscòpica no quedi arrodonida a zero) -
-    /// el que ha canviat és QUÈ ha d'arribar-hi.
-    ///
-    /// Abans es sumava el recompte de mostres "aquest nivell o pitjor" de
-    /// TOT el frame (acumulatiu de `.hail` cap avall), sense mirar si eren
-    /// contigües. Això va resultar massa permissiu a la mida real d'un
-    /// frame: una dotzena de taques febles i disperses arreu de Catalunya
-    /// (cap d'elles, per separat, prou gran per dir res) sumaven prou
-    /// mostres com per arribar al llindar total i la línia d'estat deia
-    /// "Pluja feble a Catalunya" amb un cel pràcticament net.
-    ///
-    /// La primera correcció d'això només comptava el CLÚSTER (component
-    /// connex, 8-connectat) més gran de cada nivell - però resultava massa
-    /// estricta en sentit contrari: dues o tres cèl·lules de pluja REALS i
-    /// separades (cadascuna per sota del llindar tota sola) deixaven de
-    /// comptar del tot, quan plegades sí representen un fenomen prou gran
-    /// per dir-ho. La versió actual és un punt mig: es busca el component
-    /// connex de cada nivell (`sumOfQualifyingClusters`) i es DESCARTEN els
-    /// clústers massa petits per ser un eco de veritat (`minClusterSize` -
-    /// soroll puntual, no un fenomen meteorològic), però els que
-    /// SOBREVIUEN aquest filtre se SUMEN entre ells, no es queda només el
-    /// més gran. Això resol els dos problemes de cop:
-    /// - Un artefacte de vora o un únic píxel de compressió classificat per
-    ///   atzar com `.hail` no compta: un clúster per sota de
-    ///   `minClusterSize` es descarta abans de sumar-se, igual si n'hi ha 1
-    ///   com si n'hi ha 50 d'escampats arreu del frame.
-    /// - Diverses cèl·lules de pluja reals i separades SÍ se sumen entre
-    ///   elles: cap necessita arribar sola al llindar, com passava abans
-    ///   amb "només el clúster més gran". Aquest cas, de fet, torna a
-    ///   cobrir de retruc l'últim límit conegut: la insígnia exclosa
-    ///   (`attributionRectPx`) pot, en teoria, partir un eco real en dos
-    ///   trossos si l'eco travessa just aquella cantonada - però com que ara
-    ///   se sumen tots els clústers que passin `minClusterSize` (no només
-    ///   el més gran), els dos trossos partits encara compten junts sempre
-    ///   que cap dels dos quedi per sota d'aquell mínim.
-    ///
-    /// Límit acceptat, no resolt: si la partició deixa un (o tots dos)
-    /// trossos per SOTA de `minClusterSize`, aquella part es perd. Donat que
-    /// la insígnia és una cantonada fixa i petita sobre mar obert (vegeu
-    /// `RadarCompositor.attributionRectNormalized` i el comentari de
-    /// `RadarStageView` sobre per què la llegenda també viu en aquesta
-    /// cantonada - "baix-dreta d'aquest retall és sistemàticament mar
-    /// obert"), la probabilitat real que un eco s'hi centri i es parteixi
-    /// exactament així és baixa; una màscara de connectivitat conscient de la
-    /// insígnia seria una solució completa, però no val la pena la
-    /// complexitat per a aquest racó concret.
+    /// Mateix mostreig que `hasSignificantRain` (pas de 4 píxels - als ecos
+    /// de radar, escala molt més gran, no se'ls escapa cap taca real). Es
+    /// busca el component connex de cada nivell (`sumOfQualifyingClusters`)
+    /// i es descarten els clústers massa petits per ser un eco de veritat
+    /// (`minClusterSize` - soroll puntual), però els que sobreviuen aquest
+    /// filtre se sumen entre ells, no es queda només el més gran: així una
+    /// dotzena de taques disperses no arriba al llindar per pur volum, però
+    /// diverses cèl·lules de pluja reals i separades sí compten juntes. És
+    /// la tercera versió d'aquest algorisme (abans: recompte acumulatiu de
+    /// tot el frame, després: només el clúster més gran) - vegeu
+    /// `docs/rain-detection-algorithm.md` per què les dues anteriors es van
+    /// descartar i quin límit accepta conscientment l'actual (la
+    /// insígnia exclosa pot partir un eco real en dos si cau just a la
+    /// cantonada).
     static func maxSeverityOverFrame(in image: CGImage) -> RainSeverity {
         guard let buffer = PixelBuffer(image) else { return .none }
         let exclude = attributionRectPx(for: image)

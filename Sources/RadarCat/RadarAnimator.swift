@@ -81,37 +81,24 @@ final class RadarAnimator {
 
     /// Recompon els frames JA existents (mateixos timestamps) en una aparença
     /// nova - a diferència de `build`, no hi ha dades noves, així que
-    /// `currentIndex` NO canvia (l'usuari no ha de perdre la posició on
-    /// estava mirant només perquè ha canviat de tema).
+    /// `currentIndex` NO canvia. El frame VIST es recompon PRIMER i se
+    /// substitueix a l'instant, la resta en segon pla: abans,
+    /// `setAppearance` cridava `build` sencer i els deu frames trigaven a
+    /// canviar plegats (~10 composicions de CPU seguides), visible com un
+    /// canvi de tema que es queda penjat un moment.
     ///
-    /// El frame que s'està VEIENT es recompon PRIMER i se substitueix a
-    /// l'instant; la resta es va recomponent en segon pla mentre l'usuari ja
-    /// veu alguna cosa correcta. Abans, `setAppearance` cridava `build`
-    /// sencer per a un canvi de tema: els 10 frames es recomponien tots
-    /// abans d'assignar res, així que la imatge trigava (network ja
-    /// cachejada, però encara calen ~10 composicions seqüencials de CPU) a
-    /// canviar - visible en viu com un canvi de tema que "es queda penjat"
-    /// un moment abans de saltar.
-    ///
-    /// `currentIndex` es rellegeix a CADA volta del bucle, no un cop sol a
-    /// l'inici: `TimelineTrackView.scrub` crida `seek(to:)`/`pause()`
-    /// directament (no passa per la cua de `RadarStore`), així que
-    /// l'usuari pot arrossegar la cronologia mentre aquesta funció encara
-    /// s'executa en segon pla (cada `await` és un punt de reentrada al
-    /// MainActor). Prioritzar sempre l'índex VIGENT (no el que ho era en
-    /// arrencar) evita que un frame al qual l'usuari acaba de saltar es
-    /// quedi amb l'aparença antiga fins que el bucle original hi arribi pel
-    /// seu compte. Per la mateixa raó NOMÉS es reprèn la reproducció al
-    /// final si `currentIndex` segueix sent el mateix d'on hem partit: si
-    /// l'usuari ha arrossegat mentrestant, ja ha manifestat on vol mirar
-    /// (mateix contracte que `seek`, que tampoc reprèn tot sol) i forçar
-    /// `play()` desfaria aquesta navegació manual.
+    /// `currentIndex` es rellegeix a CADA volta, no un cop sol a l'inici:
+    /// `TimelineTrackView.scrub` crida `seek(to:)` directament mentre
+    /// aquesta funció encara corre en segon pla, així que cal prioritzar
+    /// sempre l'índex vigent perquè el frame on l'usuari acaba de saltar no
+    /// es quedi amb l'aparença antiga. Per la mateixa raó només es reprèn la
+    /// reproducció al final si `currentIndex` no ha canviat des de l'inici -
+    /// si l'usuari ha arrossegat mentrestant, ja ha triat on vol mirar
+    /// (mateix contracte que `seek`, que tampoc reprèn tot sol).
     ///
     /// Cada composició es substitueix NOMÉS si `compositeFrame` ha tornat
-    /// una imatge de veritat - una fallada transitòria mai esborra una
-    /// imatge que ja hi havia i que anava bé (a diferència d'assignar `nil`
-    /// directament, que deixaria aquell frame en blanc fins al proper
-    /// refresc real).
+    /// una imatge de veritat: una fallada transitòria mai esborra un frame
+    /// que ja anava bé.
     func recolor(appearance: FrameAppearance) async {
         guard !frames.isEmpty else { return }
         let wasPlaying = isPlaying
@@ -141,14 +128,10 @@ final class RadarAnimator {
             }
         }
 
-        // Tres condicions, totes necessàries per reprendre: (1) reproduïa
-        // abans de començar, (2) `currentIndex` no ha canviat (si l'usuari
-        // ha arrossegat, ja ha triat on vol mirar - mateix contracte que
-        // `seek`, que tampoc reprèn tot sol), i (3) cap control de
-        // reproducció real (play/pausa, dreceres) s'ha tocat mentrestant -
-        // (2) per si sol NO n'hi ha prou: prémer pausa sense arrossegar no
-        // canvia `currentIndex`, però igualment expressa que l'usuari NO
-        // vol que la reproducció es reprengui tota sola en acabar.
+        // Reprèn NOMÉS si (1) reproduïa abans de començar, (2) `currentIndex`
+        // no ha canviat, i (3) cap control real de reproducció s'ha tocat
+        // mentrestant - (2) sol no basta: prémer pausa sense arrossegar no
+        // canvia `currentIndex` però igualment vol dir "no reprenguis".
         if wasPlaying && currentIndex == startIndex && !interruptedPlaybackControl { play() }
     }
 

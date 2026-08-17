@@ -40,37 +40,19 @@ actor RadarCompositor {
     /// Bounding box de Catalunya en tile-coords *de `BaseGrid`* (z=8, tile y
     /// creix cap al *nord* - vegeu `BaseGrid`). Aquest crop viu en l'espai de
     /// la base, no del radar: el radar (z=7, `RadarGrid`) es dibuixa escalat
-    /// x2 sobre aquesta base (vegeu `compositeFrame`), no al revés.
-    ///
-    /// Abans això retallava directament els tiles de radar/base de z=7, que
-    /// van resultar ser una imatge pre-tallada no estàndard sense les Terres
-    /// de l'Ebre (amb una vora negra baixada del tile y=81 i un fragment de
-    /// "Tortosa" despenjat sobre mar al tile y=79 - vegeu el git log
-    /// d'aquest fitxer per aquella versió i el raonament complet). Es va
-    /// descobrir baixant el widget real de Meteocat (`ginys/mapaRadar`) en
-    /// un navegador: el seu mapa base fa servir z=8, una projecció contínua
-    /// real que sí conté les Terres de l'Ebre de manera coherent amb la
-    /// resta del mapa (Tortosa apareix just al sud de Tarragona, sense cap
-    /// tall ni fragment despenjat). El radar de Meteocat només existeix a
-    /// z=7, per això es continua fent servir `RadarGrid` per baixar-lo,
-    /// escalant-lo x2 per encaixar amb aquesta base de z=8.
+    /// x2 sobre aquesta base (vegeu `compositeFrame`), no al revés. Per què
+    /// z=8 (i no el z=7 que aquest crop usava abans, o el z=9 provat després)
+    /// vegeu CLAUDE.md secció "Tile sources".
     ///
     /// Valors ajustats contra una mesura en píxels del contingut real
-    /// (fronteres/etiquetes) sobre aquesta graella de z=8: el cos etiquetat
-    /// de Catalunya (Vielha a les Terres de l'Ebre, Lleida a Girona) queda
-    /// aproximadament entre tile-x 128.1...130.4 i tile-y 158.6...160.8 -
-    /// això és estable (fronteres/noms no canvien), a diferència de l'eco de
-    /// pluja, que sí pot sobresortir-ne (p.ex. tempestes al Pirineu/Vall
-    /// d'Aran, just al nord del límit administratiu). El rang de sota hi
-    /// afegeix marge per l'eco de pluja a banda i banda sense allunyar la
-    /// càmera més del necessari - un primer intent més generós (127.6...
-    /// 130.5 / 158.8...162.5) deixava massa mar/muntanya buida, sobretot a
-    /// l'oest.
-    ///
-    /// S'HA PROVAT z=9 amb aquest mateix rectangle multiplicat per 2 i s'ha
-    /// desfet: vegeu el comentari a `BaseGrid` per la mesura exacta (les
-    /// etiquetes hi queden més petites, no més nítides, perquè Meteocat les
-    /// dibuixa a mida fixa en píxels de tile).
+    /// (fronteres/etiquetes): el cos etiquetat de Catalunya (Vielha a les
+    /// Terres de l'Ebre, Lleida a Girona) queda aproximadament entre tile-x
+    /// 128.1...130.4 i tile-y 158.6...160.8 - estable (fronteres/noms no
+    /// canvien), a diferència de l'eco de pluja, que sí pot sobresortir-ne
+    /// (p.ex. tempestes al Pirineu/Vall d'Aran). El rang de sota hi afegeix
+    /// marge per l'eco a banda i banda sense allunyar la càmera més del
+    /// necessari - un primer intent més generós (127.6...130.5 /
+    /// 158.8...162.5) deixava massa mar/muntanya buida, sobretot a l'oest.
     static let catalunyaTileX = 127.85...130.55
     static let catalunyaTileY = 159.4...161.95
 
@@ -219,13 +201,14 @@ actor RadarCompositor {
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return nil }
 
-            // No CTM flip here: the context stays in native Core Graphics
-            // coordinates (origin bottom-left, y increasing upward). CGContext.draw
-            // always places an image relative to its own bottom-left corner in the
-            // CURRENT transform, so drawing under a y-flipped CTM renders every
-            // tile upside down. Keeping the native, unflipped CTM and computing
-            // `dx`/`dy` below in that same native space (see `catalunyaCrop`)
-            // avoids that entirely.
+            // Sense flip de CTM: el context es queda en coordenades natives
+            // de Core Graphics (origen baix-esquerra, y creixent cap amunt).
+            // `CGContext.draw` sempre col·loca la imatge relativa a la seva
+            // pròpia cantonada inferior esquerra en la transformació VIGENT,
+            // així que dibuixar sota un CTM invertit (y cap avall) renderitza
+            // cada tile de cap per avall. Mantenir el CTM natiu, sense flip,
+            // i calcular `dx`/`dy` en aquest mateix espai (vegeu
+            // `catalunyaCrop`) ho evita del tot.
             let drawBaseTile: (Int, Int, Data) -> Void = { x, y, data in
                 guard let img = Self.makeCGImage(from: data) else { return }
                 let dx = CGFloat((x - BaseGrid.xRange.lowerBound) * BaseGrid.tileSize) - crop.minX
@@ -257,18 +240,19 @@ actor RadarCompositor {
         else { return nil }
         ctx.draw(renderedBase, in: CGRect(x: 0, y: 0, width: cw, height: ch))
 
-        // Radar only exists at z=7 (RadarGrid), one zoom level below the
-        // base map's z=8 (BaseGrid), so each radar tile covers exactly the
-        // area of 4 base tiles (standard XYZ nesting: base tile (X,Y) is a
-        // child of radar tile (X/2, Y/2)). Draw each radar tile scaled x2,
-        // anchored at its (2x, 2y) child position in BaseGrid's coordinate
-        // space - the image itself needs no flip, only its anchor point
-        // does, because RadarGrid's y increases *southward* while
-        // BaseGrid's increases *northward* (confirmed empirically, see
-        // BaseGrid's doc comment): scaling up from (2x, 2y) covers that
-        // child plus (2x+1, 2y+1), which correctly lands the radar tile's
-        // own north half over the base's north child and south half over
-        // the south child.
+        // El radar només existeix a z=7 (`RadarGrid`), un nivell de zoom per
+        // sota del mapa base a z=8 (`BaseGrid`), així que cada tile de radar
+        // cobreix exactament l'àrea de 4 tiles de base (nesting XYZ
+        // estàndard: el tile de base (X,Y) és fill del tile de radar
+        // (X/2, Y/2)). Es dibuixa cada tile de radar escalat x2, ancorat a
+        // la seva posició filla (2x, 2y) en l'espai de coordenades de
+        // `BaseGrid` - la imatge en si no necessita cap flip, només
+        // l'ancoratge, perquè la y de `RadarGrid` creix cap al *sud* mentre
+        // que la de `BaseGrid` creix cap al *nord* (confirmat empíricament,
+        // vegeu el comentari de `BaseGrid`): escalar des de (2x, 2y) cobreix
+        // aquell fill més (2x+1, 2y+1), cosa que fa caure correctament la
+        // meitat nord del tile de radar sobre el fill nord de la base i la
+        // meitat sud sobre el fill sud.
         let radarTs = baseTs * 2
         for y in RadarGrid.yRange {
             for x in RadarGrid.xRange {
@@ -320,53 +304,16 @@ actor RadarCompositor {
     /// (vegeu `compositeFrame` - mai s'aplica al frame amb el radar a
     /// sobre). Es desatura primer (`CIColorControls`, saturació 0) perquè
     /// l'únic element de color real d'aquesta capa - la insígnia
-    /// "meteo.cat" - no acabi en un negatiu de tons complementaris cridaner;
-    /// la resta de la base ja és pràcticament grisa (terreny/fronteres/
-    /// etiquetes), així que la desaturació hi és gairebé un no-op.
+    /// "meteo.cat" - no acabi en un negatiu de tons complementaris cridaner.
     ///
-    /// Una inversió pura deixa el mar MÉS CLAR que la terra, al revés del
-    /// que un mode fosc necessita: el mar és, als tiles de Meteocat, un gris
-    /// pla força fosc (~19% de luminància) i la terra un gris més clar amb
-    /// ombrejat de relleu molt variable (~35-45%); en invertir, el mar
-    /// (~81%) queda per sobre de la terra (~59%) - i com que el mar ocupa
-    /// una franja grossa del retall (tota la banda sud-est), és un bloc clar
-    /// gros dominant en un popover que hauria de ser fosc. Mesurat de
-    /// veritat (mitjana de mostres, escala 0...1, sobre el frame real
-    /// abans de corregir): mar 0.807, terra 0.594.
-    ///
-    /// `CIToneCurve`, aplicat aquí després de la inversió, és una única
-    /// funció monòtona aplicada píxel a píxel: no sap distingir mar de
-    /// terra, només veu un valor de luminància d'entrada i en treu un de
-    /// sortida. Amb això n'hi ha prou per baixar el mar cap a la banda
-    /// fosca i pujar la terra cap a una banda mitjana-fosca on el relleu
-    /// torni a ser visible, sense enfonsar les fronteres/etiquetes (que
-    /// inverteixen a gairebé blanc pur, ~95-100%, i han de seguir-se
-    /// llegint) - però NO pot capgirar quin dels dos queda més clar.
-    ///
-    /// Compromís conscient, no un descuit: com que el mar invertit (~0.81)
-    /// ja entra a la corba per sobre de la terra invertida (~0.55-0.65) per
-    /// a qualsevol relleu real, i una funció monòtona preserva l'ordre dels
-    /// valors d'entrada (no pot fer-hi baixar el mar per sota de la terra
-    /// sense deixar de ser monòtona, cosa que produiria bandes/artefactes
-    /// visibles), el mar surt sempre una mica per sobre de la terra també a
-    /// la sortida. Apple Maps en fosc pot capgirar aquesta relació (terra
-    /// fosca, mar més clar) perquè parteix de capes semàntiques separades
-    /// amb colors assignats a mà; aquí no hi ha cap capa semàntica que
-    /// distingeixi mar de terra, només un PNG ja renderitzat pel giny de
-    /// Meteocat - fer-ho de debò exigiria una màscara mar/terra que aquest
-    /// pipeline no té. El que sí fa la corba és treure-li protagonisme al
-    /// mar (comprimint-lo) alhora que aixeca la terra, no invertir-ne la
-    /// relació.
-    ///
-    /// Mesurat de veritat amb un arnès aïllat (`swiftc` fora del paquet,
-    /// aplicant aquesta mateixa cadena de filtres als tiles reals de base -
-    /// no a ull): abans d'aquest ajust, mar 0.373 / terra 0.143 (el relleu
-    /// quedava gairebé negre, només es llegien les fronteres blanques);
-    /// després, mar ~0.356 (baixat una mica més, no calia baixar-lo més) /
-    /// terra ~0.21 (dins la franja 0,19-0,22 buscada - el relleu ja es
-    /// distingeix). El mar segueix sent més clar que la terra, com calia
-    /// esperar del raonament de dalt, però ara per un marge molt més petit
-    /// i sense enfonsar la terra a negre.
+    /// Una inversió pura deixaria el mar més clar que la terra (l'invers
+    /// d'apagar-los del tot). La `CIToneCurve` que segueix comprimeix el mar
+    /// cap avall i aixeca la terra perquè el relleu es torni a distingir,
+    /// sense poder-ne capgirar l'ordre (una funció monòtona no ho permet):
+    /// el mar surt sempre una mica més clar que la terra, per un marge molt
+    /// més petit que sense corregir. Compromís conscient, no un descuit -
+    /// vegeu `docs/dark-mode-tuning.md` per les mesures i el raonament
+    /// complet darrere de cada punt de la corba.
     private static func invertedForDarkAppearance(_ image: CGImage) -> CGImage? {
         let input = CIImage(cgImage: image)
         guard let desaturateFilter = CIFilter(name: "CIColorControls") else { return nil }
@@ -382,20 +329,8 @@ actor RadarCompositor {
         curveFilter.setValue(inverted, forKey: kCIInputImageKey)
         // 5 punts (x=luminància original invertida, y=luminància final),
         // triats a partir dels percentils reals del frame invertit (mar
-        // ~0.81, terra ~0.59, fronteres/etiquetes ~0.95-1.0): el mar baixa a
-        // ~0.36 (banda fosca, gairebé igual que abans - ja hi anava bé) i
-        // les fronteres/etiquetes es mantenen prou clares (~0.88) per
-        // seguir-se llegint. `inputPoint2` és el canvi clau d'aquest ajust:
-        // abans (0.65, 0.16) queia lluny del valor real de la terra (~0.59)
-        // i la deixava gairebé negra (~0.14 mesurat); ara està clavat
-        // pràcticament sobre el valor real de la terra i apuntant al mig de
-        // la franja 0,19-0,22 buscada, que és exactament on cau un cop
-        // corregit (~0.21 mesurat - vegeu el comentari de dalt de la funció
-        // per l'arnès amb què s'ha mesurat). `inputPoint1` (abans 0.49/0.08)
-        // baixa a (0.35, 0.05) perquè les ombres de relleu més fosques
-        // (per sota de la terra "plana") segueixin fent una transició suau
-        // cap a `inputPoint0`, en lloc d'un salt brusc ara que `inputPoint2`
-        // s'ha mogut.
+        // ~0.81, terra ~0.59, fronteres/etiquetes ~0.95-1.0) - vegeu
+        // `docs/dark-mode-tuning.md` per com es van triar i mesurar.
         curveFilter.setValue(CIVector(x: 0.0, y: 0.0), forKey: "inputPoint0")
         curveFilter.setValue(CIVector(x: 0.35, y: 0.05), forKey: "inputPoint1")
         curveFilter.setValue(CIVector(x: 0.59, y: 0.20), forKey: "inputPoint2")
