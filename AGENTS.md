@@ -57,6 +57,14 @@ NOT the same pyramid and must not be treated as one:
   Measured by normalising both frames to the popover's real width (760px): at z=8 "Barcelona" is legible,
   at z=9 it drops to ~5-6px tall and z=9 also adds many more labels that become noise at 380pt. z=9 makes
   labels *smaller*, not sharper. Don't migrate again without re-measuring at the final display size.
+  Confirmed independently from a second angle: Meteocat's own `ginys/mapaRadar` widget (Leaflet) sets
+  `maxNativeZoom: 7` on the radar layer explicitly in its JS, so even its own interactive zoom control
+  never fetches radar above z=7 - it just CSS-scales the frozen z=7 tile, visibly blurring the echo the
+  further you zoom. Its zoom control also never does "same crop, higher z": each zoom-in step pairs a
+  higher base z with a proportionally *smaller* crop, never a bigger z over the current one. If this app
+  ever added zoom, the real feature is "pick a smaller bounding box and re-verify the right base z for
+  it", not "expose z as a slider" - the latter is exactly the mistake the z=9 measurement above already
+  caught once.
 - **Base map** (`fonsTileURL`, `GoogleMapsCompatible`) exists at both z=7 and z=8, and these are
   two *different, unrelated* images, not two levels of the same pyramid:
   - z=7 (the grid this app used to use for the base map too) is a small pre-rendered widget image
